@@ -1,4 +1,5 @@
-# GW1B — Fall 2026 · The $10,000 Language Model Challenge on GWU Pegasus
+# GW1B — CSCI 4364/6364 Machine Learning Fall 2026 · The $10,000 Language Model Challenge on GWU Pegasus
+## Instructor: John Sipple
 
 [![tests](https://github.com/vorhersager/gw1b-f2026/actions/workflows/tests.yml/badge.svg)](https://github.com/vorhersager/gw1b-f2026/actions/workflows/tests.yml)
 ![JAX](https://img.shields.io/badge/JAX-0.10.2%20%7C%20CUDA%2012-blue)
