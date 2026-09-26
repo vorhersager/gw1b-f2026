@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Run a command inside the GW1B environment (container if available, shared venv otherwise).
+#   gw1b-exec python -m gw1b.train --config configs/50m.yaml
+#   gw1b-exec jupyter lab ...
+# Works on login nodes (CPU) and inside Slurm jobs (GPU). Used by every other gw1b command.
+set -euo pipefail
+GW1B_HOME="${GW1B_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+source "$GW1B_HOME/gw1b.env"
+
+_load_module_system() {
+    if ! command -v module >/dev/null 2>&1; then
+        [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh 2>/dev/null || true
+        [[ -n "${LMOD_PKG:-}" && -f "$LMOD_PKG/init/bash" ]] && source "$LMOD_PKG/init/bash" 2>/dev/null || true
+        [[ -f /usr/share/lmod/lmod/init/bash ]] && source /usr/share/lmod/lmod/init/bash 2>/dev/null || true
+    fi
+}
+_container_cmd() { command -v apptainer 2>/dev/null || command -v singularity 2>/dev/null || true; }
+
+runtime="$GW1B_RUNTIME"
+ctr="$(_container_cmd)"
+if [[ "$runtime" != "venv" && -z "$ctr" ]]; then
+    _load_module_system
+    module load "$GW1B_APPTAINER_MODULE" >/dev/null 2>&1 || module load singularity >/dev/null 2>&1 || true
+    ctr="$(_container_cmd)"
+fi
+if [[ "$runtime" == "auto" ]]; then
+    if [[ -n "$ctr" && -e "$GW1B_SIF" ]]; then runtime=sif
+    elif [[ -x "$GW1B_VENV/bin/python" ]]; then runtime=venv
+    else
+        echo "gw1b-exec: no environment found. Expected container $GW1B_SIF (needs apptainer/singularity)" >&2
+        echo "           or venv $GW1B_VENV. Instructor: run env/build_sif.sh or env/build_venv.sh." >&2
+        exit 1
+    fi
+fi
+
+# Everything the gw1b package needs; students' own checkout can be put first via PYTHONPATH.
+export PYTHONPATH="$GW1B_HOME${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONNOUSERSITE=1
+export GW1B_HOME GW1B_GROUP GW1B_SCRATCH HF_HOME HF_DATASETS_CACHE JAX_COMPILATION_CACHE_DIR WANDB_DIR WANDB_MODE
+mkdir -p "$JAX_COMPILATION_CACHE_DIR" "$PYTHONPYCACHEPREFIX" 2>/dev/null || true
+export JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS="${JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS:-2}"
+
+if [[ "$runtime" == "sif" ]]; then
+    binds="$GW1B_GROUP,$GW1B_SCRATCH"
+    for d in /lustre /scratch /groups "$(dirname "$GW1B_GROUP")"; do
+        [[ -d "$d" ]] && binds="$binds,$d"
+    done
+    [[ -n "${SLURM_TMPDIR:-}" && -d "${SLURM_TMPDIR:-}" ]] && binds="$binds,$SLURM_TMPDIR"
+    nv="--nv"
+    command -v nvidia-smi >/dev/null 2>&1 || nv=""   # login/CPU nodes: no GPU driver to bind
+    exec "$ctr" exec $nv --bind "$binds" --pwd "$PWD" "$GW1B_SIF" "$@"
+else
+    export PATH="$GW1B_VENV/bin:$PATH"
+    export VIRTUAL_ENV="$GW1B_VENV"
+    exec "$@"
+fi

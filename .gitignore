@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+notebooks/*.nbconvert.ipynb
+.pytest_cache/
+.venv/
+*.sif
+*.bin
+*.safetensors
+*.model.bak
+runs/
+release/
+docs/CLUSTER_FACTS.generated.md
+ONBOARDING.md

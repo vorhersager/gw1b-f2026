@@ -1,0 +1,29 @@
+# A model that trains in ~1 minute on a CPU or any GPU. Use it to check the pipeline end-to-end.
+model:
+  vocab_size: 512
+  d_model: 128
+  n_layers: 4
+  n_heads: 4
+  n_kv_heads: 2
+  head_dim: 32
+  d_ff: 512
+  max_seq_len: 128
+  dtype: float32
+data:
+  train_dir: ${GW1B_SCRATCH}/data/synthetic/train
+  val_dir: ${GW1B_SCRATCH}/data/synthetic/val
+  seq_len: 128
+  num_workers: 1
+optim:
+  lr: 1.0e-3
+  warmup_steps: 20
+  weight_decay: 0.1
+run:
+  name: tiny_debug
+  batch_size: 16
+  total_steps: 200
+  log_every: 20
+  eval_every: 100
+  eval_batches: 5
+  ckpt_every: 100
+  ckpt_keep: 2

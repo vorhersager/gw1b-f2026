@@ -1,0 +1,294 @@
+#!/usr/bin/env bash
+# gw1b — the one command students use on Pegasus.
+#
+#   gw1b setup                      one-time: add the environment to your ~/.bashrc, create your folders
+#   gw1b jupyter [opts]             start JupyterLab on a GPU node and print the ssh-tunnel + URL (Colab-ready)
+#   gw1b run [opts] <python args>   submit a batch job, e.g.  gw1b run --gpus 4 -m gw1b.train --config configs/100m.yaml
+#   gw1b train [opts] --config ...  shortcut for  gw1b run [opts] -m gw1b.train --config ...
+#   gw1b shell [opts]               interactive GPU shell inside the environment
+#   gw1b python ...                 run python in the environment on the login node (CPU: dry-runs, budgets)
+#   gw1b budget ...                 compute-budget calculator (python -m gw1b.budget ...)
+#   gw1b status                     your jobs + free GPUs per partition
+#   gw1b cancel <jobid|all>         cancel jobs
+#   gw1b doctor [--gpu]             check the setup (add --gpu to run a 3-minute GPU smoke test job)
+#   gw1b kernel                     install a "GW1B" Jupyter kernel for Open OnDemand / VS Code
+#
+# Job options (all optional): --gpus N  --nodes K  --partition NAME  --time D-HH:MM:SS  --cpus N  --mem 48G
+#                             --name NAME  --chain K (resubmit K times for long runs)  --after JOBID  --cpu
+set -euo pipefail
+GW1B_HOME="${GW1B_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+export GW1B_HOME
+source "$GW1B_HOME/gw1b.env"
+export PATH="$GW1B_HOME/bin:$PATH"
+USER_DIR="$GW1B_SCRATCH/users/$USER"
+
+die()  { echo "gw1b: $*" >&2; exit 1; }
+info() { echo "[gw1b] $*"; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+
+# ------------------------------------------------------------------ option parsing
+OPT_GPUS="$GW1B_DEFAULT_GPUS"; OPT_NODES=1; OPT_PART=""; OPT_TIME=""; OPT_CPUS="$GW1B_DEFAULT_CPUS"; OPT_MEM="$GW1B_DEFAULT_MEM"
+OPT_NAME=""; OPT_CHAIN=1; OPT_AFTER=""; OPT_CPU=0; OPT_LOCAL_PORT=8888; OPT_ROOT=""; OPT_INFO=0; OPT_STOP=0; OPT_GPU_TEST=0
+parse_opts() {   # consumes known options, leaves the rest in REST
+    REST=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --gpus|-g)        OPT_GPUS="$2"; shift 2 ;;
+            --nodes|-N)       OPT_NODES="$2"; shift 2 ;;
+            --partition|-p)   OPT_PART="$2"; shift 2 ;;
+            --time|-t)        OPT_TIME="$2"; shift 2 ;;
+            --cpus|-c)        OPT_CPUS="$2"; shift 2 ;;
+            --mem)            OPT_MEM="$2"; shift 2 ;;
+            --name|-J)        OPT_NAME="$2"; shift 2 ;;
+            --chain)          OPT_CHAIN="$2"; shift 2 ;;
+            --after)          OPT_AFTER="$2"; shift 2 ;;
+            --cpu)            OPT_CPU=1; OPT_GPUS=0; shift ;;
+            --local-port)     OPT_LOCAL_PORT="$2"; shift 2 ;;
+            --root)           OPT_ROOT="$2"; shift 2 ;;
+            --info)           OPT_INFO=1; shift ;;
+            --stop)           OPT_STOP=1; shift ;;
+            --gpu)            OPT_GPU_TEST=1; shift ;;
+            --)               shift; REST+=("$@"); break ;;
+            *)                REST+=("$1"); shift ;;
+        esac
+    done
+}
+
+partition_for() {   # pick a sensible partition if none given
+    if [[ -n "$OPT_PART" ]]; then echo "$OPT_PART"
+    elif [[ "$OPT_CPU" == 1 ]]; then echo "$GW1B_PART_CPU"
+    elif [[ "$OPT_GPUS" -ge 5 && -n "$GW1B_PART_A100" ]]; then echo "$GW1B_PART_A100"
+    elif [[ "$OPT_GPUS" -ge 3 ]]; then echo "$GW1B_PART_V100_4"
+    else echo "$GW1B_DEFAULT_PARTITION"; fi
+}
+
+sbatch_common() {   # common sbatch flags -> printed one per line
+    local part; part="$(partition_for)"
+    mkdir -p "$USER_DIR/jobs"
+    echo "--partition=$part"
+    [[ "$OPT_GPUS" -gt 0 ]] && echo "--gres=${GW1B_GRES}:${OPT_GPUS}"
+    echo "--cpus-per-task=$OPT_CPUS"
+    echo "--mem=$OPT_MEM"
+    echo "--time=${OPT_TIME:-$GW1B_DEFAULT_TIME}"
+    [[ -n "$GW1B_ACCOUNT" ]] && echo "--account=$GW1B_ACCOUNT"
+    [[ -n "$GW1B_QOS" ]] && echo "--qos=$GW1B_QOS"
+    echo "--output=$USER_DIR/jobs/%x-%j.out"
+    echo "--export=ALL,GW1B_HOME=$GW1B_HOME"
+    for extra in $GW1B_SBATCH_EXTRA; do echo "$extra"; done
+    return 0
+}
+
+submit() {   # submit <sbatch script> <script args...> ; prints job id
+    local script="$1"; shift
+    local -a flags; mapfile -t flags < <(sbatch_common)
+    [[ -n "$OPT_NAME" ]] && flags+=("--job-name=$OPT_NAME")
+    [[ -n "$OPT_AFTER" ]] && flags+=("--dependency=afterany:$OPT_AFTER")
+    local out
+    out="$(sbatch --parsable "${flags[@]}" "$script" "$@")" || die "sbatch failed"
+    echo "${out%%;*}"
+}
+
+# ------------------------------------------------------------------ commands
+cmd_setup() {
+    local line="source $GW1B_HOME/activate.sh"
+    if ! grep -qsF "$line" "$HOME/.bashrc"; then
+        printf '\n# GW1B class environment\n%s\n' "$line" >> "$HOME/.bashrc"
+        info "added to ~/.bashrc: $line"
+    else info "~/.bashrc already sources the environment"; fi
+    mkdir -p "$USER_DIR/runs" "$USER_DIR/jobs" "$JAX_COMPILATION_CACHE_DIR"
+    info "your scratch folder: $USER_DIR   (checkpoints, runs; purged monthly — copy results to $HOME or the group dir)"
+    if [[ ! -d "$HOME/gw1b" ]]; then
+        mkdir -p "$HOME/gw1b" && cp -r "$GW1B_HOME/notebooks" "$HOME/gw1b/" && cp -r "$GW1B_HOME/configs" "$HOME/gw1b/"
+        info "copied starter notebooks + configs to ~/gw1b/"
+    fi
+    info "next:  gw1b doctor    then    gw1b jupyter"
+}
+
+cmd_jupyter() {
+    parse_opts "$@"
+    if [[ "$OPT_STOP" == 1 ]]; then
+        squeue -u "$USER" -h -n gw1b-jupyter -o %i | xargs -r scancel && info "stopped Jupyter job(s)"; return; fi
+    if [[ "$OPT_INFO" == 1 ]]; then
+        local id; for id in $(squeue -u "$USER" -h -n gw1b-jupyter -t R -o %i); do
+            [[ -f "$USER_DIR/jobs/jupyter-$id.json" ]] && print_jupyter_info "$id"; done; return; fi
+    local running; running="$(squeue -u "$USER" -h -n gw1b-jupyter -t R,PD -o %i | head -1 || true)"
+    if [[ -n "$running" ]]; then
+        info "you already have a Jupyter job ($running). Showing its connection info (use 'gw1b jupyter --stop' to end it)."
+        wait_and_print "$running"; return
+    fi
+    OPT_TIME="${OPT_TIME:-$GW1B_JUPYTER_TIME}"
+    export GW1B_LOCAL_PORT="$OPT_LOCAL_PORT" GW1B_JUPYTER_ROOT="${OPT_ROOT:-$HOME}"
+    OPT_NAME="gw1b-jupyter"
+    local id; id="$(submit "$GW1B_HOME/slurm/jupyter.sbatch")"
+    info "submitted Jupyter job $id on partition $(partition_for) ($OPT_GPUS GPU, $OPT_TIME). Waiting for it to start..."
+    wait_and_print "$id"
+}
+
+wait_and_print() {
+    local id="$1" state="" reason="" waited=0
+    while true; do
+        read -r state reason <<< "$(squeue -j "$id" -h -o "%T %R" 2>/dev/null || echo "GONE -")"
+        case "$state" in
+            RUNNING) break ;;
+            GONE|COMPLETED|FAILED|CANCELLED|TIMEOUT) die "job $id is $state — see $USER_DIR/jobs/gw1b-jupyter-$id.out" ;;
+            *) [[ $((waited % 30)) -eq 0 ]] && info "job $id is $state ($reason) — waiting (Ctrl-C leaves it queued; 'gw1b cancel $id' removes it)"
+               sleep 5; waited=$((waited + 5)) ;;
+        esac
+    done
+    local f="$USER_DIR/jobs/jupyter-$id.json" n=0
+    while [[ ! -s "$f" && $n -lt 60 ]]; do sleep 2; n=$((n + 1)); done
+    [[ -s "$f" ]] || die "Jupyter did not write its connection file; check $USER_DIR/jobs/gw1b-jupyter-$id.out"
+    print_jupyter_info "$id"
+}
+
+print_jupyter_info() {
+    local f="$USER_DIR/jobs/jupyter-$1.json"
+    local node port token lport
+    node="$(sed -n 's/.*"node": "\([^"]*\)".*/\1/p' "$f")"; port="$(sed -n 's/.*"port": \([0-9]*\).*/\1/p' "$f")"
+    token="$(sed -n 's/.*"token": "\([^"]*\)".*/\1/p' "$f")"; lport="$(sed -n 's/.*"local_port": \([0-9]*\).*/\1/p' "$f")"
+    cat <<EOF
+
+  Jupyter job $1 is RUNNING on $node (GPU node).  Time limit: $(squeue -j "$1" -h -o %L) left.
+
+  1) On YOUR LAPTOP, in a new terminal (keep it open):
+       ssh -N -L $lport:$node:$port -L 6006:$node:6006 $USER@$GW1B_LOGIN_HOST
+
+  2) JupyterLab:   http://localhost:$lport/lab?token=$token
+     Colab:        Connect ▾ -> "Connect to a local runtime" -> http://localhost:$lport/?token=$token
+
+  3) Finished?     gw1b cancel $1
+EOF
+}
+
+cmd_run() {
+    parse_opts "$@"
+    [[ ${#REST[@]} -gt 0 ]] || die "nothing to run. Example: gw1b run --gpus 2 -m gw1b.train --config configs/50m.yaml"
+    local script="$GW1B_HOME/slurm/run.sbatch" id prev="$OPT_AFTER" i
+    local -a extra=()
+    if [[ "$OPT_NODES" -gt 1 ]]; then
+        [[ "${REST[0]}" == "-m" && "${REST[1]:-}" == "gw1b.train" ]] || die "--nodes > 1 is only supported for '-m gw1b.train ...'"
+        script="$GW1B_HOME/slurm/train_multinode.sbatch"; REST=("${REST[@]:2}")
+        extra=("--nodes=$OPT_NODES" "--ntasks-per-node=$OPT_GPUS")
+    fi
+    if [[ -z "$OPT_NAME" ]]; then   # derive a job name from the config/script name, e.g. gw1b-100m
+        local last="" a
+        for a in "${REST[@]}"; do [[ "$a" == *.yaml || "$a" == *.py ]] && last="$a"; done
+        last="${last##*/}"; last="${last%.*}"
+        OPT_NAME="gw1b-$(printf '%s' "${last:-job}" | tr -c 'A-Za-z0-9_.-' '_' | cut -c1-24)"
+    fi
+    for ((i = 1; i <= OPT_CHAIN; i++)); do
+        OPT_AFTER="$prev"
+        local -a flags; mapfile -t flags < <(sbatch_common)
+        flags+=("--job-name=$OPT_NAME" ${extra[@]+"${extra[@]}"})
+        [[ -n "$OPT_AFTER" ]] && flags+=("--dependency=afterany:$OPT_AFTER")
+        id="$(sbatch --parsable "${flags[@]}" "$script" "${REST[@]}")" || die "sbatch failed"; id="${id%%;*}"
+        info "submitted job $id (${OPT_NODES} node(s) x ${OPT_GPUS} GPU, partition $(partition_for), ${OPT_TIME:-$GW1B_DEFAULT_TIME})${prev:+ after $prev}"
+        prev="$id"
+    done
+    info "output: $USER_DIR/jobs/$OPT_NAME-<jobid>.out     status: gw1b status"
+}
+
+cmd_shell() {
+    parse_opts "$@"
+    local part; part="$(partition_for)"
+    local -a flags=("--partition=$part" "--cpus-per-task=$OPT_CPUS" "--mem=$OPT_MEM" "--time=${OPT_TIME:-$GW1B_DEFAULT_TIME}" "--job-name=gw1b-shell")
+    [[ "$OPT_GPUS" -gt 0 ]] && flags+=("--gres=${GW1B_GRES}:${OPT_GPUS}")
+    [[ -n "$GW1B_ACCOUNT" ]] && flags+=("--account=$GW1B_ACCOUNT")
+    [[ -n "$GW1B_QOS" ]] && flags+=("--qos=$GW1B_QOS")
+    info "requesting an interactive shell: partition $part, $OPT_GPUS GPU(s), ${OPT_TIME:-$GW1B_DEFAULT_TIME} (type 'exit' to release it)"
+    exec srun "${flags[@]}" $GW1B_SBATCH_EXTRA --export=ALL,GW1B_HOME="$GW1B_HOME" --pty gw1b-exec bash -l
+}
+
+cmd_status() {
+    echo "== your jobs =="; squeue -u "$USER" -o "%.10i %-18j %-12P %.3D %.10T %.10M %.10l %R" 2>&1
+    echo; echo "== GPU partitions (nodes idle/allocated, GRES) =="
+    local parts="$GW1B_PART_DEBUG,$GW1B_PART_V100_2,$GW1B_PART_V100_4"
+    [[ -n "$GW1B_PART_A100" ]] && parts="$parts,$GW1B_PART_A100"
+    [[ -n "$GW1B_PART_L40S" ]] && parts="$parts,$GW1B_PART_L40S"
+    sinfo -p "$parts" -o "%-12P %-6a %-10l %-14F %-20G" 2>&1 || true
+    echo; echo "== running Jupyter =="; cmd_jupyter --info
+}
+
+cmd_cancel() {
+    [[ $# -gt 0 ]] || die "usage: gw1b cancel <jobid> | all"
+    if [[ "$1" == "all" ]]; then scancel -u "$USER" && info "cancelled all your jobs"; else scancel "$@" && info "cancelled $*"; fi
+}
+
+cmd_doctor() {
+    parse_opts "$@"
+    local ok=1
+    check() { if eval "$2"; then printf '  [ok]   %s\n' "$1"; else printf '  [FAIL] %s\n' "$1"; ok=0; fi; }
+    echo "GW1B doctor (v$GW1B_ENV_VERSION) — $(hostname -s), $(date)"
+    check "group dir $GW1B_GROUP exists"               '[[ -d "$GW1B_GROUP" ]]'
+    check "scratch dir $GW1B_SCRATCH is writable"      '[[ -d "$GW1B_SCRATCH" && -w "$GW1B_SCRATCH" ]] || mkdir -p "$USER_DIR" 2>/dev/null'
+    check "gw1b package readable at $GW1B_HOME"        '[[ -f "$GW1B_HOME/gw1b/train.py" ]]'
+    if [[ -e "$GW1B_SIF" ]]; then check "container image $GW1B_SIF" 'true'; else printf '  [info] no container image at %s\n' "$GW1B_SIF"; fi
+    if [[ -x "$GW1B_VENV/bin/python" ]]; then check "venv $GW1B_VENV" 'true'; else printf '  [info] no venv at %s\n' "$GW1B_VENV"; fi
+    check "an environment can be started (gw1b-exec)"  'gw1b-exec python -c "import jax, flax, optax, orbax.checkpoint, sentencepiece, gw1b" 2>/dev/null'
+    check "Slurm commands available"                   'command -v sbatch >/dev/null && command -v squeue >/dev/null'
+    check "partition '$GW1B_DEFAULT_PARTITION' exists" 'sinfo -h -p "$GW1B_DEFAULT_PARTITION" 2>/dev/null | grep -q .'
+    [[ -z "$GW1B_PART_A100" ]] && printf '  [warn] GW1B_PART_A100 is not set in gw1b.env (run slurm/discover_cluster.sh to find the A100 partition)\n'
+    check "home quota not full (df on \$HOME)"          '[[ $(df --output=pcent "$HOME" 2>/dev/null | tail -1 | tr -dc 0-9) -lt 95 ]]'
+    gw1b-exec python -c "import jax, flax; print('  [info] jax', jax.__version__, 'flax', flax.__version__, '(login node backend:', jax.default_backend() + ')')" 2>/dev/null || true
+    if [[ "$OPT_GPU_TEST" == 1 ]]; then
+        OPT_NAME="gw1b-smoke"; OPT_TIME="00:10:00"
+        local id; id="$(submit "$GW1B_HOME/slurm/gpu_smoke_test.sbatch")"
+        info "submitted GPU smoke test job $id on $(partition_for); waiting..."
+        while squeue -j "$id" -h -o %T 2>/dev/null | grep -qE "PENDING|RUNNING|CONFIGURING|COMPLETING"; do sleep 10; done
+        local out="$USER_DIR/jobs/gw1b-smoke-$id.out"
+        if grep -q "SMOKE TEST PASSED" "$out" 2>/dev/null; then
+            printf '  [ok]   GPU smoke test: %s\n' "$(grep -m1 'matmul' "$out")"
+            printf '         %s\n' "$(grep -m1 'devices:' "$out")"
+        else printf '  [FAIL] GPU smoke test — see %s\n' "$out"; ok=0; fi
+    else
+        printf '  [info] run "gw1b doctor --gpu" to also test a GPU node (3 minutes)\n'
+    fi
+    [[ "$ok" == 1 ]] && echo "All checks passed." || { echo "Some checks failed — see docs/TROUBLESHOOTING.md"; exit 1; }
+}
+
+cmd_kernel() {
+    local dir="$HOME/.local/share/jupyter/kernels/gw1b"
+    mkdir -p "$dir"
+    cat > "$dir/kernel.json" <<EOF
+{
+  "argv": ["$GW1B_HOME/bin/gw1b-exec", "python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+  "display_name": "GW1B (JAX, v$GW1B_ENV_VERSION)",
+  "language": "python",
+  "env": {"GW1B_HOME": "$GW1B_HOME"}
+}
+EOF
+    info "installed Jupyter kernel 'GW1B (JAX)' at $dir — select it in Open OnDemand JupyterLab or VS Code"
+}
+
+# ------------------------------------------------------------------ dispatch
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+    setup)    cmd_setup "$@" ;;
+    jupyter|lab) cmd_jupyter "$@" ;;
+    run)      cmd_run "$@" ;;
+    train)    # gw1b train [job opts] <gw1b.train args>  ->  gw1b run [job opts] -m gw1b.train <args>
+              parse_opts "$@"
+              args=()
+              [[ "$OPT_GPUS" != "$GW1B_DEFAULT_GPUS" ]] && args+=(--gpus "$OPT_GPUS")
+              [[ "$OPT_NODES" != 1 ]] && args+=(--nodes "$OPT_NODES")
+              [[ -n "$OPT_PART" ]] && args+=(--partition "$OPT_PART")
+              [[ -n "$OPT_TIME" ]] && args+=(--time "$OPT_TIME")
+              [[ "$OPT_CPUS" != "$GW1B_DEFAULT_CPUS" ]] && args+=(--cpus "$OPT_CPUS")
+              [[ "$OPT_MEM" != "$GW1B_DEFAULT_MEM" ]] && args+=(--mem "$OPT_MEM")
+              [[ -n "$OPT_NAME" ]] && args+=(--name "$OPT_NAME")
+              [[ "$OPT_CHAIN" != 1 ]] && args+=(--chain "$OPT_CHAIN")
+              [[ -n "$OPT_AFTER" ]] && args+=(--after "$OPT_AFTER")
+              [[ "$OPT_CPU" == 1 ]] && args+=(--cpu)
+              cmd_run ${args[@]+"${args[@]}"} -- -m gw1b.train ${REST[@]+"${REST[@]}"} ;;
+    shell|interactive) cmd_shell "$@" ;;
+    python)   exec gw1b-exec python "$@" ;;
+    exec)     exec gw1b-exec "$@" ;;
+    budget)   exec gw1b-exec python -m gw1b.budget "$@" ;;
+    status|st) cmd_status ;;
+    cancel)   cmd_cancel "$@" ;;
+    doctor)   cmd_doctor "$@" ;;
+    kernel)   cmd_kernel ;;
+    version)  echo "gw1b env $GW1B_ENV_VERSION ($GW1B_HOME)" ;;
+    help|-h|--help) usage ;;
+    *) die "unknown command '$cmd' (try: gw1b help)" ;;
+esac

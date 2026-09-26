@@ -1,0 +1,26 @@
+# ~50M-parameter proxy model (Team 1 / Team 2 / Team 3 experiments). Chinchilla-optimal ~1B tokens.
+# 1 x A100: ~1.5 h per 1B tokens at 35% MFU;  1 x V100 (f32): ~10 h.
+model:
+  vocab_size: 32000
+  d_model: 512
+  n_layers: 12
+  n_heads: 8
+  n_kv_heads: 2
+  head_dim: 64
+  d_ff: 1408
+  max_seq_len: 2048
+data:
+  seq_len: 2048
+optim:
+  lr: 6.0e-4
+  warmup_steps: 500
+  weight_decay: 0.1
+  grad_clip: 1.0
+run:
+  name: 50m
+  batch_size: 128            # 128 x 2048 = 262k tokens / step
+  total_tokens: 1_000_000_000
+  log_every: 20
+  eval_every: 500
+  eval_batches: 20
+  ckpt_every: 1000

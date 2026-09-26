@@ -1,0 +1,31 @@
+# GW1B core environment — top-level requirements. The fully pinned lock is requirements.txt
+# (regenerate with env/lock.sh). CUDA 12 wheels are used on purpose: CUDA 13 dropped Volta (V100).
+jax[cuda12]==0.10.2
+flax==0.12.8
+optax==0.2.8
+orbax-checkpoint==0.12.6
+grain==0.2.18
+sentencepiece==0.2.2
+tokenizers==0.23.2
+datasets==5.0.1
+huggingface_hub
+pyarrow
+numpy
+pyyaml
+safetensors
+ml_dtypes
+tensorboardX
+tensorboard
+wandb
+jupyterlab==4.6.4
+ipykernel
+ipywidgets
+jupyterlab-git
+matplotlib
+pandas
+seaborn
+scipy
+scikit-learn
+tqdm
+rich
+protobuf

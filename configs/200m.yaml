@@ -1,0 +1,16 @@
+# ~200M-parameter proxy model. Chinchilla-optimal ~4B tokens.
+extends: 50m.yaml
+model:
+  d_model: 1024
+  n_layers: 16
+  n_heads: 16
+  n_kv_heads: 4
+  head_dim: 64
+  d_ff: 2560
+optim:
+  lr: 4.0e-4
+  warmup_steps: 1000
+run:
+  name: 200m
+  batch_size: 256
+  total_tokens: 4_000_000_000

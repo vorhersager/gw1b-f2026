@@ -1,0 +1,42 @@
+# GW-1B Base: the design-document architecture (~1.15B parameters).
+# 8 x A100-80GB at ~35% MFU: ~55 h per 20B tokens; 100B tokens ~11 days (chain jobs, checkpoints resume).
+model:
+  vocab_size: 32000
+  d_model: 1792
+  n_layers: 32
+  n_heads: 28
+  n_kv_heads: 7
+  head_dim: 64
+  d_ff: 4864
+  max_seq_len: 2048
+  activation: swiglu
+  norm: rmsnorm
+  pos: rope
+  rope_theta: 10000.0
+  tie_embeddings: true
+  dtype: bfloat16
+data:
+  seq_len: 2048
+optim:
+  name: adamw
+  lr: 3.0e-4
+  min_lr_ratio: 0.1
+  schedule: cosine
+  warmup_steps: 2000
+  beta1: 0.9
+  beta2: 0.95
+  weight_decay: 0.1
+  grad_clip: 1.0
+  grad_accum: 1
+run:
+  name: gw1b-base
+  out_dir: ${GW1B_SCRATCH}/checkpoints
+  batch_size: 512            # 512 x 2048 = 1.05M tokens / step
+  total_tokens: 20_000_000_000
+  log_every: 10
+  eval_every: 500
+  eval_batches: 40
+  ckpt_every: 500
+  ckpt_keep: 3
+  ckpt_keep_every: 5000      # keep every 5000th step forever (~5B tokens) for Team 5's checkpoint studies
+  shard_params: true

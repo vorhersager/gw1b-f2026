@@ -1,0 +1,8 @@
+# Evaluation / release extras: lm-evaluation-harness needs PyTorch, which we install CPU-only
+# (it is only used for import compatibility and for the CPU export check — all GPU work is JAX).
+# Installed after requirements.txt with:
+#   pip install -r requirements-eval.txt --extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0+cpu
+transformers==5.17.0
+lm-eval==0.4.13
+accelerate

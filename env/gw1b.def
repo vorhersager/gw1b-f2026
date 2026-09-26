@@ -1,0 +1,65 @@
+Bootstrap: docker
+From: python:3.12-slim-bookworm
+
+# GW1B class environment — JAX 0.10 (CUDA 12 wheels), Flax NNX, Optax, Orbax, Grain, SentencePiece,
+# Hugging Face datasets/tokenizers, JupyterLab, lm-evaluation-harness (with CPU-only PyTorch).
+#
+# Build (needs root or --fakeroot, ~10 min, ~7 GB):
+#     apptainer build gw1b.sif gw1b.def
+# Run:
+#     apptainer exec --nv gw1b.sif python -c "import jax; print(jax.devices())"
+#
+# The CUDA runtime libraries come from the pip wheels (nvidia-*-cu12); only the NVIDIA *driver*
+# comes from the host through `--nv`. Driver >= 525 is required (CUDA 12).
+
+%files
+    requirements.txt      /opt/gw1b/requirements.txt
+    requirements-eval.txt /opt/gw1b/requirements-eval.txt
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        git curl ca-certificates openssh-client procps htop tmux vim-tiny less zstd \
+        libgomp1 libgl1 build-essential
+    rm -rf /var/lib/apt/lists/*
+
+    python -m pip install --no-cache-dir --upgrade pip
+    # 1) fully pinned core environment (JAX stack, data tools, JupyterLab)
+    python -m pip install --no-cache-dir -r /opt/gw1b/requirements.txt
+    # 2) evaluation extras with CPU-only PyTorch (never a CUDA build of torch in this image)
+    python -m pip install --no-cache-dir -r /opt/gw1b/requirements-eval.txt \
+        --extra-index-url https://download.pytorch.org/whl/cpu
+    # 3) sanity check: CUDA plugin importable, cudnn present
+    python -c "import jax, flax, optax, orbax.checkpoint, sentencepiece, datasets, lm_eval, torch; \
+               print('jax', jax.__version__, 'flax', flax.__version__, 'torch', torch.__version__)"
+    python -m pip freeze > /opt/gw1b/pip-freeze.txt
+    mkdir -p /lustre /SEAS /CCAS /GWSB /SMHS /SPH /ESIA /CPS /GSEHD /LAW /c1 /groups /scratch /data
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PYTHONNOUSERSITE=1            # never pick up ~/.local packages: everyone runs the same stack
+    export PYTHONUNBUFFERED=1
+    export HF_HUB_DISABLE_TELEMETRY=1
+    export TOKENIZERS_PARALLELISM=false
+    export GW1B_ENV_VERSION=2026.09
+    # Reasonable XLA defaults for training on NVIDIA GPUs
+    export XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.92}
+    export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_enable_latency_hiding_scheduler=true}"
+    export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
+
+%runscript
+    exec "$@"
+
+%labels
+    Author GW1B course staff
+    Version 2026.09
+    Description JAX/Flax LLM training environment for the GWU Pegasus cluster
+
+%help
+    GW1B environment. Examples:
+      apptainer exec --nv gw1b.sif python -c "import jax; print(jax.devices())"
+      apptainer exec --nv gw1b.sif jupyter lab --ip=0.0.0.0 --port=8888 --no-browser
+    Installed package versions: /opt/gw1b/pip-freeze.txt

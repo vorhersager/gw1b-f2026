@@ -1,0 +1,24 @@
+[project]
+name = "gw1b"
+version = "2026.9.0"
+description = "GW1B: JAX/Flax toolchain for training a ~1B-parameter language model on the GWU Pegasus cluster"
+requires-python = ">=3.11"
+readme = "README.md"
+# Runtime dependencies are pinned in env/requirements.txt (the class environment). Listed here only so that
+# `pip install -e .` works for local development on a laptop.
+dependencies = ["jax>=0.10", "flax>=0.12", "optax>=0.2.8", "orbax-checkpoint>=0.12", "sentencepiece", "numpy", "pyyaml",
+                "safetensors", "ml_dtypes", "tensorboardX", "pyarrow", "huggingface_hub", "tqdm"]
+
+[project.optional-dependencies]
+eval = ["lm-eval==0.4.13", "transformers", "torch"]
+dev = ["pytest", "nbformat", "nbconvert", "jupyterlab", "matplotlib", "pandas"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["gw1b"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

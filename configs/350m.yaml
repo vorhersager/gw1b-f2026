@@ -1,0 +1,16 @@
+# ~350M-parameter proxy model (largest scaling-ladder point). Chinchilla-optimal ~7B tokens.
+extends: 50m.yaml
+model:
+  d_model: 1280
+  n_layers: 18
+  n_heads: 20
+  n_kv_heads: 5
+  head_dim: 64
+  d_ff: 3456
+optim:
+  lr: 3.0e-4
+  warmup_steps: 1000
+run:
+  name: 350m
+  batch_size: 256
+  total_tokens: 7_000_000_000

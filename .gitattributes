@@ -1,2 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Everything that runs on Pegasus must keep LF endings even when committed from Windows
+*.sh        text eol=lf
+*.sbatch    text eol=lf
+*.def       text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.env       text eol=lf
+bin/*       text eol=lf
+activate.sh text eol=lf
+Dockerfile  text eol=lf
+*.ps1       text eol=crlf
+*.ipynb     text eol=lf
