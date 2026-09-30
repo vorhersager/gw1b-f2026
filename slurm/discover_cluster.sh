@@ -47,7 +47,7 @@ for d in "$GW1B_GROUP" "$GW1B_SCRATCH" "$HOME" /lustre /scratch; do
   [[ -e "$d" ]] && { printf '%s: ' "$d"; df -h "$d" 2>/dev/null | tail -1; } || echo "$d: does not exist"
 done
 quota -s 2>/dev/null | head -20
-command -v lfs >/dev/null && lfs quota -h -u "$USER" /lustre 2>/dev/null | head
+command -v mmlsquota >/dev/null && mmlsquota -u "$USER" 2>/dev/null | head; command -v lfs >/dev/null && lfs quota -h -u "$USER" /lustre 2>/dev/null | head
 endsection
 
 section "Python / tools on the login node"
@@ -62,7 +62,7 @@ done
 endsection
 
 section "GPU node check (driver version decides CUDA 12 support: need >= 525) — via a 2-minute srun on the debug partition"
-timeout 300 srun --partition="${GW1B_PART_DEBUG:-debug-gpu}" ${GW1B_ACCOUNT:+--account=$GW1B_ACCOUNT} --gres="${GW1B_GRES:-gpu}":1 --time=00:03:00 --pty \
+timeout 300 srun --partition="${GW1B_PART_GPU:-gpu}" ${GW1B_ACCOUNT:+--account=$GW1B_ACCOUNT} --gres="${GW1B_GRES:-gpu}:${GW1B_GPU_DEFAULT:-v100}":1 --time=00:03:00 --pty \
   bash -c 'hostname -s; cat /etc/os-release | head -2; nvidia-smi --query-gpu=name,memory.total,driver_version,compute_cap --format=csv; \
            for c in apptainer singularity; do printf "%-12s %s\n" $c "$(command -v $c 2>/dev/null || echo not-in-PATH)"; done; \
            for u in https://huggingface.co https://pypi.org; do printf "%s -> %s\n" $u "$(curl -s -o /dev/null -w %{http_code} --max-time 8 $u || echo ERR)"; done' 2>&1

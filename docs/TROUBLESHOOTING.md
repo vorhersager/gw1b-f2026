@@ -6,7 +6,7 @@
 `apptainer` is not available. Instructor: `env/build_sif.sh` or `env/build_venv.sh`; if apptainer is a module, set
 `GW1B_APPTAINER_MODULE` in `gw1b.env`.
 
-**`sbatch: error: invalid partition` / `Invalid account`** — the `VERIFY` lines in `gw1b.env` (`GW1B_PART_*`,
+**`sbatch: error: invalid partition` / `Invalid generic resource` / `Invalid account`** — the `VERIFY` lines in `gw1b.env` (`GW1B_PART_*`, `GW1B_GPU_*`,
 `GW1B_ACCOUNT`, `GW1B_GRES`). Run `bash slurm/discover_cluster.sh`.
 
 **JAX sees no GPU (`jax.devices()` → CpuDevice) inside a GPU job**
@@ -29,7 +29,7 @@ shorten `data.seq_len`, make sure `run.shard_params=true`, or lower `XLA_PYTHON_
 **`cudnn` attention error** — `--set model.attn_implementation=xla` (auto-selection picked cuDNN on an unsupported
 shape/GPU). Please report the shape to the instructor.
 
-**Jupyter: "job is PENDING (Resources)"** — the partition is full; wait, or try `--partition small-gpu` / fewer GPUs /
+**Jupyter: "job is PENDING (Resources)"** — no idle GPU of that type; wait, check `gw1b status`, or try `--gpu-type any` / fewer GPUs /
 shorter `--time`. `gw1b status` shows free GPUs per partition.
 
 **Jupyter connects but kernels die / `import gw1b` fails** — you are probably in an Open OnDemand or hosted-Colab kernel,
@@ -44,7 +44,7 @@ URL with the token; try the JupyterLab URL in a browser tab first.
 **`Disk quota exceeded` in home** — caches went to `$HOME`. `gw1b.env` sends `HF_HOME`, `WANDB_DIR`, the JAX cache and
 `PYTHONPYCACHEPREFIX` to scratch/`/tmp`; check `du -sh ~/.cache ~/.local` and delete.
 
-**My data/checkpoints disappeared** — Lustre scratch is purged monthly. Keep milestone checkpoints and results in
+**My data/checkpoints disappeared** — scratch (`/scratch/gw1b-class`, GPFS) is not backed up and may be purged (policy: ask HPC). Keep milestone checkpoints and results in
 `$GW1B_GROUP`/your home/GitHub; ask the instructor about the purge extension.
 
 **Multi-node job hangs at start** — NCCL cannot find the interconnect. Set `NCCL_SOCKET_IFNAME` / `NCCL_IB_HCA` in

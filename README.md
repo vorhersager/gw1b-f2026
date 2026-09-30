@@ -48,7 +48,7 @@ Optional: `ssh-copy-id <netid>@pegasus.arc.gwu.edu` from your laptop so tunnels 
 ### 2. Every day: a GPU JupyterLab (also usable from Google Colab)
 ```bash
 gw1b jupyter                                  # 1 GPU, 4 h on the debug partition (defaults)
-gw1b jupyter --gpus 2 --time 3:00:00 --partition small-gpu
+gw1b jupyter --gpus 2 --time 3:00:00              # 2 V100s; --gpu-type a100 for an A100
 ```
 When the job starts it prints:
 ```
@@ -119,7 +119,7 @@ bash gw1b-f2026/bin/gw1b-admin all         # "bash …" the first time: a Window
 | `students` | bakes your paths into the laptop scripts and writes `ONBOARDING.md` — the message you send to the class |
 
 Before you start, line up with HPC support: the class Unix group with all students in it, group storage
-(`/<SCHOOL>/groups/gw1b`) and Lustre scratch (`/lustre/groups/gw1b`, with a purge extension), Pegasus accounts for
+(`/SEAS/groups/gw1b`) and GPFS scratch (`/scratch/gw1b-class`; Lustre is retired), Pegasus accounts for
 the students, and — nice to have — a reservation of one A100 node for the final run. If `apptainer build` is
 refused on the login node, build the identical image with Docker on a laptop (`env/Dockerfile`) and copy the `.sif`.
 Everything else: [`docs/INSTRUCTOR_SETUP.md`](docs/INSTRUCTOR_SETUP.md).

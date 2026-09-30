@@ -21,7 +21,7 @@ JupyterLab in your browser, from Google Colab, or as batch jobs.
 On Pegasus:
 ```bash
 gw1b jupyter                       # 1 GPU, 4 h on the debug partition (defaults)
-gw1b jupyter --gpus 2 --time 3:00:00 --partition small-gpu
+gw1b jupyter --gpus 2 --time 3:00:00               # 2 V100s (4 = a NVLink node); --gpu-type a100 for an A100
 ```
 Wait until it prints:
 ```
@@ -58,8 +58,9 @@ gw1b cancel <jobid>
   `$GW1B_SCRATCH/users/<netid>/runs/<run.name>/` (`config.yaml`, `metrics.jsonl`, `tb/`, `checkpoints/`, `summary.json`).
 * **Time limits**: if the job hits its limit, just resubmit the same command — it resumes from the last checkpoint.
   For runs longer than a limit submit a chain: `--chain 4` queues four dependent jobs.
-* **Which GPUs**: `--gpus 1–2` → V100 nodes (`small-gpu`), `3–4` → 4×V100 (`large-gpu`), `5–8` → A100 node (if your
-  instructor set `GW1B_PART_A100`); or pick explicitly with `--partition`. V100s have no bf16 → add `--set model.dtype=float32`.
+* **Which GPUs**: Pegasus has one `gpu` partition; the model is chosen with `--gpu-type v100|a100|l40s` (default
+  V100; `--gpus 5–8` implies A100). V100s have no bf16 → add `--set model.dtype=float32`. `gw1b status` shows how
+  many nodes of each type are idle right now.
 * Interactive shell on a GPU node (for debugging): `gw1b shell --gpus 1 --time 1:00:00`.
 
 ## 4. Where files live
@@ -67,7 +68,7 @@ gw1b cancel <jobid>
 | path | what | notes |
 |---|---|---|
 | `~` | notebooks, small files | 25 GB quota, backed up-ish; **never** run jobs here |
-| `$GW1B_SCRATCH/users/<netid>/` | your runs, checkpoints, JAX compile cache | fast Lustre, **purged monthly** |
+| `$GW1B_SCRATCH/users/<netid>/` | your runs, checkpoints, JAX compile cache | fast GPFS scratch, **not backed up** |
 | `$GW1B_SCRATCH/teams/team<N>/` | team-shared runs and data | same |
 | `$GW1B_SCRATCH/data/` | the class corpora (token shards) and HF cache | read-only |
 | `$GW1B_GROUP/` | the environment, tokenizer, released models | read-only |
@@ -79,7 +80,7 @@ GitHub repo. A checkpoint of a 350M model is ~1.4 GB (bf16) / 4.2 GB with optimi
 
 The class package is importable everywhere (`import gw1b`). Your own code goes in your home or team folder:
 ```python
-import sys; sys.path.insert(0, "/lustre/groups/gw1b/teams/team2/ourcode")     # in a notebook
+import sys; sys.path.insert(0, "/scratch/gw1b-class/teams/team2/ourcode")     # in a notebook
 ```
 or `cd` to that folder before `gw1b run script.py`. To modify the package itself, copy `gw1b/` into your
 folder and put it first on `PYTHONPATH` (`export PYTHONPATH=/path/to/yourcopy:$PYTHONPATH`) — your copy wins.

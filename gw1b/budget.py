@@ -13,9 +13,10 @@ import re
 # dense (non-sparse) peak TFLOP/s for the matmul precision students will actually use
 GPU_PEAK_TFLOPS = {
     # name: (bf16/fp16 tensor-core peak, fp32 peak, memory GB, notional $/GPU-hour on public clouds)
-    "v100": (125.0, 15.7, 16, 1.0),        # Pegasus small-gpu / large-gpu nodes (V100 has no bf16 -> use fp16 or f32)
-    "a100": (312.0, 19.5, 80, 2.0),        # Pegasus 8x A100-80GB PCIe nodes
-    "l40s": (362.0, 91.6, 48, 1.5),        # Pegasus expansion nodes
+    "v100": (125.0, 15.7, 16, 1.0),        # Pegasus 2x/4x V100 nodes, --gpu-type v100 (no bf16 -> use fp16 or f32)
+    "a100": (312.0, 19.5, 80, 2.0),        # Pegasus gpu050/gpu051: 8x A100-80GB PCIe, --gpu-type a100
+    "l40s": (362.0, 91.6, 48, 1.5),        # Pegasus L40S nodes, --gpu-type l40s
+    "rtx6000": (500.0, 120.0, 96, 2.5),    # RTX PRO 6000 Blackwell 96GB nodes (Oct 2026): 1 PFLOP/s FP16 sparse spec -> ~500 dense; measure!
     "h100": (989.0, 67.0, 96, 3.5),        # Pegasus Grace Hopper nodes (H100 96GB) - ARM host!
     "v6e":  (918.0, 918.0, 32, 2.7),       # TPU Trillium chip (design-doc reference)
 }
