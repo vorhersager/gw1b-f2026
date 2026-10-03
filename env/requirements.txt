@@ -195,3 +195,4 @@ widgetsnbextension==4.0.16
 xxhash==4.0.1
 yarl==1.25.1
 zipp==4.1.0
+pytest==9.1.1

@@ -12,3 +12,5 @@ runs/
 release/
 docs/CLUSTER_FACTS.generated.md
 ONBOARDING.md
+onboarding/
+gw1b.local.env

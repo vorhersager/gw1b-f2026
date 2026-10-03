@@ -79,7 +79,8 @@ gw1b cancel <jobid>
 Runs land in `$GW1B_SCRATCH/users/<netid>/runs/<run.name>/` with `config.yaml`, `metrics.jsonl`, `tb/`,
 `checkpoints/` and `summary.json` (loss, tokens, FLOPs, GPU-hours, $ — the numbers every experiment reports).
 A job that hits its time limit **resumes from its last checkpoint** when resubmitted; `--chain 4` queues four
-dependent jobs up front. V100 nodes: add `--set model.dtype=float32` (no bf16 tensor cores).
+dependent jobs up front. `model.dtype: auto` trains in bf16 on A100/L40S/GH200 and in float32 on V100s (no bf16
+tensor cores); override with `--set model.dtype=bfloat16|float32`.
 
 ### 4. Know the cost before you submit
 ```bash
@@ -112,12 +113,12 @@ bash gw1b-f2026/bin/gw1b-admin all         # "bash …" the first time: a Window
 
 | step (`gw1b-admin <step>`, all re-runnable; `gw1b-admin status` shows progress) | what it does |
 |---|---|
-| `init` | paths + class Unix group → `gw1b.env`; copies the repo to `$GW1B_GROUP/gw1b-f2026` (students read it from there); creates the storage layout with group permissions |
-| `discover` | `sinfo` / `sacctmgr` / `sbatch --test-only` + a 3-minute GPU probe → A100/L40S partition names, `--account` requirement, GRES syntax, wall-time limits, apptainer, NVIDIA driver version (≥ 525 required), internet — written into `gw1b.env` and `docs/CLUSTER_FACTS.generated.md` |
+| `init` | paths + class Unix group → `gw1b.local.env` (git-ignored overrides of `gw1b.env`); copies the repo to `$GW1B_GROUP/gw1b-f2026` (students read it from there); creates the storage layout with group permissions |
+| `discover` | `sinfo` / `sacctmgr` / `sbatch --test-only` + a 3-minute GPU probe → A100/L40S partition names, `--account` requirement, GRES syntax, wall-time limits, apptainer, NVIDIA driver version (≥ 525 required), internet — written into `gw1b.local.env` and `docs/CLUSTER_FACTS.generated.md` |
 | `build` | the container `$GW1B_GROUP/sif/gw1b-2026.09.sif` from `env/gw1b.def` (≈ 7 GB, ≈ 10 min), or the shared `uv` venv if there is no Apptainer |
 | `test` | imports, the CPU test suite inside the environment, `gw1b doctor --gpu` (a real GPU job) |
 | `data` | FineWeb-Edu `sample-10BT` download (≈ 28 GB, login node) → tokenizer corpus → tokenizer job → tokenization job (chained) → `$GW1B_SCRATCH/data/fineweb-edu-10B` |
-| `students` | bakes your paths into the laptop scripts and writes `ONBOARDING.md` — the message you send to the class |
+| `students` | writes `onboarding/ONBOARDING.md` — the message you send to the class — plus laptop scripts with your paths baked in |
 
 Before you start, line up with HPC support: the class Unix group with all students in it, group storage
 (`/SEAS/groups/gw1b`) and GPFS scratch (`/scratch/gw1b-class`; Lustre is retired), Pegasus accounts for
@@ -169,7 +170,8 @@ the V100/A100/L40S/GH200 specifics: [`docs/CLUSTER_FACTS.md`](docs/CLUSTER_FACTS
 ## Repository layout
 
 ```
-gw1b.env            the ONE config file (paths, partitions, account, defaults)     ← filled in by gw1b-admin
+gw1b.env            the config file: Pegasus defaults (paths, partitions, GPU types, caches)
+gw1b.local.env      site values written by gw1b-admin init/discover (git-ignored; wins over gw1b.env)
 activate.sh         students `source` this
 bin/gw1b            student CLI: setup jupyter run train shell python budget status cancel doctor kernel
 bin/gw1b-admin      instructor CLI: init discover build test data students status all

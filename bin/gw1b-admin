@@ -2,12 +2,12 @@
 # gw1b-admin — instructor / TA setup of the GW1B environment on Pegasus (run on a login node).
 #
 #   gw1b-admin all              run every step below in order, pausing where it needs you
-#   gw1b-admin init             paths + class group -> gw1b.env, directory layout, permissions, repo in the group dir
-#   gw1b-admin discover         inspect the cluster (partitions, account, GRES, apptainer, driver) and fill in gw1b.env
+#   gw1b-admin init             paths + class group -> gw1b.local.env, directory layout, permissions, repo in the group dir
+#   gw1b-admin discover         inspect the cluster (partitions, account, GRES, apptainer, driver) -> gw1b.local.env
 #   gw1b-admin build [sif|venv] build the environment (container if apptainer exists, else the shared venv)
 #   gw1b-admin test             import test + pytest inside the environment + 3-minute GPU smoke test job
 #   gw1b-admin data             FineWeb-Edu download -> tokenizer corpus -> tokenizer job -> token-shard job
-#   gw1b-admin students         write ONBOARDING.md and pre-configure the laptop scripts for your paths
+#   gw1b-admin students         write onboarding/ONBOARDING.md + laptop scripts pre-configured for your paths
 #   gw1b-admin status           what is done, what is missing
 #
 # Options:  --yes (accept all defaults, no prompts)   --sample 10BT|100BT|350BT   --vocab 32000   --type bpe|unigram
@@ -15,7 +15,8 @@
 set -uo pipefail
 THIS_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export GW1B_HOME="${GW1B_HOME:-$THIS_HOME}"
-ENV_FILE="$THIS_HOME/gw1b.env"
+ENV_FILE="$THIS_HOME/gw1b.env"              # defaults, tracked by git — never edited by this script
+LOCAL_ENV="$THIS_HOME/gw1b.local.env"        # site values written by init/discover; git-ignored, sourced first by gw1b.env
 YES=0; FORCE=0; GPU_TEST=1; SKIP_DL=0; SAMPLE="10BT"; VOCAB=32000; TOK_TYPE="bpe"
 ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -49,16 +50,42 @@ ask() {  # ask VAR "prompt" default
 }
 confirm() { [[ "$YES" == 1 ]] && return 0; local r; read -r -p "  $1 [Y/n]: " r; [[ -z "$r" || "$r" =~ ^[Yy] ]]; }
 
-env_set() {  # env_set KEY VALUE  -> rewrites the default in   export KEY="${KEY:-...}"
+env_set() {  # env_set KEY VALUE  -> records   export KEY="value"   in gw1b.local.env (wins over gw1b.env and over stale shell values)
     local key="$1" value="$2"
-    if grep -q "^export $key=" "$ENV_FILE"; then
-        sed -i "s|^export $key=\"\${$key:-[^}]*}\"|export $key=\"\${$key:-$value}\"|" "$ENV_FILE"
+    if [[ ! -f "$LOCAL_ENV" ]]; then
+        printf '# Site-specific GW1B values, written by `gw1b-admin init` / `discover` on %s (%s). Edit freely.\n' "$(hostname -s)" "$(date +%F)" > "$LOCAL_ENV"
+        printf '# gw1b.env sources this file first, so these win over its defaults; git ignores it, so `git pull` never conflicts.\n' >> "$LOCAL_ENV"
+    fi
+    if grep -q "^export $key=" "$LOCAL_ENV"; then
+        sed -i "s|^export $key=.*|export $key=\"$value\"|" "$LOCAL_ENV"
     else
-        printf 'export %s="${%s:-%s}"\n' "$key" "$key" "$value" >> "$ENV_FILE"
+        printf 'export %s="%s"\n' "$key" "$value" >> "$LOCAL_ENV"
     fi
     export "$key=$value"
 }
-load_env() { set -a; source "$ENV_FILE"; set +a; }
+migrate_env() {  # until 2026-10-03 init/discover edited gw1b.env itself; move such edits to gw1b.local.env so git pull works
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$THIS_HOME" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    git -C "$THIS_HOME" diff --quiet -- gw1b.env 2>/dev/null && return 0
+    info "gw1b.env has local edits from an earlier init/discover — moving them to gw1b.local.env"
+    local line n=0
+    while IFS= read -r line; do   # export KEY="${KEY:-value}"   (optionally followed by a comment)
+        if [[ "$line" =~ ^export\ ([A-Za-z0-9_]+)=\"\$\{[A-Za-z0-9_]+:-([^}]*)\}\" ]]; then
+            env_set "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"; n=$((n + 1))
+        fi
+    done < <(git -C "$THIS_HOME" diff -U0 -- gw1b.env | grep '^+export ' | sed 's/^+//')
+    git -C "$THIS_HOME" checkout -- gw1b.env 2>/dev/null && ok "$n value(s) moved to $LOCAL_ENV; gw1b.env is back to the repository version"
+}
+normalize_local_env() {  # lines copied by hand as  export KEY="${KEY:-value}"  would lose against a stale shell value: make them plain
+    [[ -f "$LOCAL_ENV" ]] || return 0
+    grep -q '^export [A-Za-z0-9_]*="\${' "$LOCAL_ENV" 2>/dev/null || return 0
+    local line
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^export\ ([A-Za-z0-9_]+)=\"\$\{[A-Za-z0-9_]+:-([^}]*)\}\" ]]; then env_set "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"; fi
+    done < <(grep '^export [A-Za-z0-9_]*="\${' "$LOCAL_ENV")
+    info "gw1b.local.env: rewrote \${KEY:-value} lines as plain values"
+}
+load_env() { migrate_env; normalize_local_env; set -a; source "$ENV_FILE"; set +a; }
 load_module_system() {
     if ! command -v module >/dev/null 2>&1; then
         [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh 2>/dev/null
@@ -121,7 +148,7 @@ cmd_init() {
 
     # group membership
     if id -Gn | tr ' ' '\n' | grep -qx "$GW1B_UNIX_GROUP"; then ok "you are a member of $GW1B_UNIX_GROUP"
-    else warn "you are NOT in group $GW1B_UNIX_GROUP (your groups: $(id -Gn)). Ask HPC support, or fix GW1B_UNIX_GROUP in gw1b.env"; fi
+    else warn "you are NOT in group $GW1B_UNIX_GROUP (your groups: $(id -Gn)). Ask HPC support, or fix GW1B_UNIX_GROUP in gw1b.local.env"; fi
 
     # layout
     mkdir -p "$GW1B_GROUP"/{sif,tokenizer,release,venv} 2>/dev/null || die "cannot write to $GW1B_GROUP"
@@ -135,7 +162,7 @@ cmd_init() {
     chmod 2755 "$GW1B_SCRATCH" "$GW1B_SCRATCH/data" "$GW1B_SCRATCH/hf_cache" 2>/dev/null
     chmod 2775 "$GW1B_SCRATCH"/{users,teams,checkpoints,tmp} "$GW1B_SCRATCH"/teams/team* 2>/dev/null
     ok "permissions: group $GW1B_UNIX_GROUP reads $GW1B_GROUP, writes $GW1B_SCRATCH/{users,teams,checkpoints}"
-    ok "gw1b.env updated: $ENV_FILE"
+    ok "site values recorded in $LOCAL_ENV (git-ignored; gw1b.env keeps the defaults)"
 }
 
 # ------------------------------------------------------------------ discover
@@ -143,12 +170,13 @@ find_partition() {  # find_partition <regex on node GRES/features> -> most commo
     sinfo -N -h -o '%P %G %f' 2>/dev/null | grep -iE "$1" | awk '{print $1}' | tr -d '*' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}'
 }
 cmd_discover() {
-    step "2/6 discover — cluster facts -> gw1b.env"
+    step "2/6 discover — cluster facts -> gw1b.local.env"
     load_env; load_module_system
     have_slurm || die "no Slurm commands here — run this on a Pegasus login node"
     local facts="$THIS_HOME/docs/CLUSTER_FACTS.generated.md"
-    info "full dump (for the record, includes a 3-minute GPU-node probe) -> $facts"
-    GW1B_HOME="$THIS_HOME" bash "$THIS_HOME/slurm/discover_cluster.sh" > "$facts" 2>&1 || true
+    if [[ "$GPU_TEST" == 1 ]]; then info "full dump -> $facts  (about 1 minute, plus up to 2 minutes waiting for a free GPU)"
+    else info "full dump -> $facts  (about 1 minute; GPU probe skipped)"; fi
+    GW1B_HOME="$THIS_HOME" GW1B_DISCOVER_GPU_PROBE="$GPU_TEST" bash "$THIS_HOME/slurm/discover_cluster.sh" > "$facts" || true
 
     # --- partitions: Pegasus has ONE gpu partition; GPU models are GRES types -------------------
     local parts; parts="$(sinfo -h -o '%P' | tr -d '*' | sort -u | tr '\n' ' ')"
@@ -229,8 +257,8 @@ cmd_discover() {
 
     # --- GPU node probe: driver version decides whether the CUDA 12 wheels run -------------
     if [[ "$GPU_TEST" == 1 ]]; then
-        info "probing a $GW1B_GPU_DEFAULT node on $GW1B_PART_GPU (waits for a free GPU, up to 5 minutes)..."
-        local -a sflags=("--partition=$GW1B_PART_GPU" "--gres=$gres:1" "--time=00:03:00" "--job-name=gw1b-probe")
+        info "probing a $GW1B_GPU_DEFAULT node on $GW1B_PART_GPU (gives up if no GPU is free within 2 minutes)..."
+        local -a sflags=("--partition=$GW1B_PART_GPU" "--gres=$gres:1" "--time=00:03:00" "--job-name=gw1b-probe" "--immediate=120")
         [[ -n "${GW1B_ACCOUNT:-}" ]] && sflags+=("--account=$GW1B_ACCOUNT")
         local probe
         probe="$(timeout 330 srun "${sflags[@]}" bash -c 'nvidia-smi --query-gpu=driver_version,name,memory.total,compute_cap --format=csv,noheader | head -1; echo "CTR:$(command -v apptainer || command -v singularity || echo none)"; echo "NET:$(curl -s -o /dev/null -w %{http_code} --max-time 6 https://huggingface.co || echo ERR)"' 2>/dev/null)"
@@ -248,7 +276,7 @@ cmd_discover() {
             warn "could not run the GPU probe (queue busy or partition/gres wrong) — re-run 'gw1b-admin discover' later or check $facts"
         fi
     fi
-    ok "gw1b.env updated. Review it once:  ${EDITOR:-nano} $ENV_FILE"
+    ok "site values recorded in $LOCAL_ENV. Review it once:  ${EDITOR:-nano} $LOCAL_ENV"
 }
 
 # ------------------------------------------------------------------ build
@@ -304,8 +332,19 @@ cmd_test() {
     if "$THIS_HOME/bin/gw1b-exec" python -c "import jax, flax, optax, orbax.checkpoint, sentencepiece, datasets, lm_eval, gw1b" 2>"$TMP/imp.err"; then
         ok "environment imports: $("$THIS_HOME/bin/gw1b-exec" python -c 'import jax, flax; print("jax", jax.__version__, "flax", flax.__version__)')"
     else fail "imports failed: $(tail -1 "$TMP/imp.err")"; return 1; fi
+    # pytest is a dev tool, not part of the pinned runtime; older images lack it -> install it beside the environment
+    local tools="$GW1B_GROUP/tools/pytest"
+    if ! "$THIS_HOME/bin/gw1b-exec" python -c "import pytest" 2>/dev/null; then
+        if [[ ! -d "$tools/pytest" ]]; then
+            info "the image has no pytest; installing it once into $tools (login-node internet)"
+            "$THIS_HOME/bin/gw1b-exec" python -m pip install --quiet --disable-pip-version-check --target "$tools" pytest 2>&1 | tail -2 || true
+            chgrp -R "$GW1B_UNIX_GROUP" "$tools" 2>/dev/null; chmod -R g+rX "$tools" 2>/dev/null
+        fi
+        export PYTHONPATH="$tools${PYTHONPATH:+:$PYTHONPATH}"
+        "$THIS_HOME/bin/gw1b-exec" python -c "import pytest" 2>/dev/null || { fail "could not install pytest (no internet on this node?) — run 'gw1b-admin test' from a node with internet, or add pytest to env/requirements.in and rebuild"; return 1; }
+    fi
     info "running the CPU test suite inside the environment (~1-2 min)..."
-    if (cd "$THIS_HOME" && nice -n 10 "$THIS_HOME/bin/gw1b-exec" python -m pytest tests -q -x 2>&1 | tail -3); then ok "tests passed"; else fail "tests failed"; return 1; fi
+    if (cd "$THIS_HOME" && nice -n 10 "$THIS_HOME/bin/gw1b-exec" python -m pytest tests -q -x -p no:cacheprovider 2>&1 | tail -3); then ok "tests passed"; else fail "tests failed"; return 1; fi
     if [[ "$GPU_TEST" == 1 ]]; then
         have_slurm || { warn "no Slurm here; skipping the GPU smoke test"; return 0; }
         "$THIS_HOME/bin/gw1b" doctor --gpu || return 1
@@ -373,13 +412,18 @@ cmd_data() {
 cmd_students() {
     step "6/6 students — onboarding text and laptop scripts"
     load_env
-    # bake the real paths into the laptop scripts
-    sed -i "s|GW1B_HOME_REMOTE:-[^}]*}|GW1B_HOME_REMOTE:-$GW1B_HOME}|" "$THIS_HOME/laptop/gw1b-connect.sh"
-    sed -i "s|else { \"/[^\"]*/gw1b-f2026\" }|else { \"$GW1B_HOME\" }|" "$THIS_HOME/laptop/gw1b-connect.ps1"
-    sed -i "s|GW1B_LOGIN_HOST:-[^}]*}|GW1B_LOGIN_HOST:-$GW1B_LOGIN_HOST}|" "$THIS_HOME/laptop/gw1b-connect.sh"
-    sed -i "s|else { \"pegasus[^\"]*\" }|else { \"$GW1B_LOGIN_HOST\" }|" "$THIS_HOME/laptop/gw1b-connect.ps1"
-    ok "laptop/gw1b-connect.sh and .ps1 now default to $GW1B_HOME on $GW1B_LOGIN_HOST"
-    cat > "$THIS_HOME/ONBOARDING.md" <<EOF
+    # bake the real paths into COPIES of the laptop scripts (onboarding/ is git-ignored; laptop/ stays as in git)
+    local out="$THIS_HOME/onboarding"; mkdir -p "$out"
+    sed -e "s|GW1B_HOME_REMOTE:-[^}]*}|GW1B_HOME_REMOTE:-$GW1B_HOME}|" -e "s|GW1B_LOGIN_HOST:-[^}]*}|GW1B_LOGIN_HOST:-$GW1B_LOGIN_HOST}|" \
+        "$THIS_HOME/laptop/gw1b-connect.sh" > "$out/gw1b-connect.sh"; chmod +x "$out/gw1b-connect.sh"
+    sed -e "s|else { \"/[^\"]*/gw1b-f2026\" }|else { \"$GW1B_HOME\" }|" -e "s|else { \"pegasus[^\"]*\" }|else { \"$GW1B_LOGIN_HOST\" }|" \
+        "$THIS_HOME/laptop/gw1b-connect.ps1" > "$out/gw1b-connect.ps1"
+    ok "onboarding/gw1b-connect.sh and .ps1 default to $GW1B_HOME on $GW1B_LOGIN_HOST"
+    if ! cmp -s "$out/gw1b-connect.sh" "$THIS_HOME/laptop/gw1b-connect.sh" || ! cmp -s "$out/gw1b-connect.ps1" "$THIS_HOME/laptop/gw1b-connect.ps1"; then
+        warn "laptop/ in the repository still has other defaults; students who download from GitHub would need to set GW1B_HOME_REMOTE."
+        info "to fix that for good:  cp onboarding/gw1b-connect.* laptop/ && git add laptop && git commit -m 'laptop scripts: class paths' && git push"
+    fi
+    cat > "$out/ONBOARDING.md" <<EOF
 # GW1B on Pegasus — getting started (send this to the students)
 
 You need: (1) a Pegasus account — submit the **HPC Access Request form** with your **SSH public key**
@@ -407,8 +451,8 @@ Run the printed \`ssh -N -L …\` line in a terminal **on your laptop**, then op
 No terminal? The Open OnDemand portal $GW1B_OOD_URL has a *Jupyter Notebook Pegasus* app: run \`gw1b kernel\` once on the
 login node, then pick the **GW1B (JAX)** kernel in the app (review every field before Launch).
 
-One command from the laptop instead: \`laptop/gw1b-connect.sh <netid>\` (macOS/Linux) or
-\`laptop\\gw1b-connect.ps1 <netid>\` (Windows) — both are in $GW1B_HOME/laptop and in the class repo.
+One command from the laptop instead: \`gw1b-connect.sh <netid>\` (macOS/Linux) or \`gw1b-connect.ps1 <netid>\`
+(Windows) — pre-configured copies are in $GW1B_HOME/onboarding, the originals in the class repo under laptop/.
 
 ## Longer training runs
 \`\`\`bash
@@ -417,14 +461,15 @@ gw1b status  |  gw1b cancel <jobid>  |  gw1b budget --config configs/50m.yaml --
 \`\`\`
 Full guide: $GW1B_HOME/docs/STUDENT_GUIDE.md · GPUs and tools explained: docs/PRIMER.md · Colab: docs/COLAB.md · problems: docs/TROUBLESHOOTING.md
 EOF
-    ok "wrote $THIS_HOME/ONBOARDING.md"
-    printf '\n%s\n' "$(sed -n '1,14p' "$THIS_HOME/ONBOARDING.md")"
+    ok "wrote $out/ONBOARDING.md — send it to the class together with the two scripts next to it"
+    printf '\n%s\n' "$(sed -n '1,14p' "$out/ONBOARDING.md")"
 }
 
 # ------------------------------------------------------------------ status
 cmd_status() {
     load_env
     printf 'GW1B setup status (%s)\n' "$ENV_FILE"
+    [[ -f "$LOCAL_ENV" ]] && ok "site values in $LOCAL_ENV" || warn "no gw1b.local.env yet — running on the defaults of gw1b.env (init)"
     [[ -d "$GW1B_GROUP" ]] && ok "group dir $GW1B_GROUP" || fail "group dir $GW1B_GROUP missing (init)"
     [[ -d "$GW1B_SCRATCH/users" ]] && ok "scratch layout $GW1B_SCRATCH" || fail "scratch layout missing (init)"
     [[ "$(readlink -f "$THIS_HOME")" == "$(readlink -f "$GW1B_HOME" 2>/dev/null)" ]] && ok "repo at $GW1B_HOME" || warn "repo is at $THIS_HOME, gw1b.env says $GW1B_HOME (init)"
@@ -434,7 +479,7 @@ cmd_status() {
     ls "$GW1B_SCRATCH/users/$USER/jobs"/gw1b-smoke-*.out >/dev/null 2>&1 && grep -q "SMOKE TEST PASSED" "$GW1B_SCRATCH/users/$USER/jobs"/gw1b-smoke-*.out 2>/dev/null && ok "GPU smoke test passed" || warn "GPU smoke test not passed yet (test)"
     ls "$GW1B_GROUP"/tokenizer/*.model >/dev/null 2>&1 && ok "tokenizer: $(ls "$GW1B_GROUP"/tokenizer/*.model | xargs -n1 basename | tr '\n' ' ')" || warn "no tokenizer yet (data)"
     ls "$GW1B_SCRATCH"/data/fineweb-edu-*/train/*.bin >/dev/null 2>&1 && ok "token shards: $(du -sh "$GW1B_SCRATCH"/data/fineweb-edu-*/train 2>/dev/null | awk '{print $1" "$2}' | tr '\n' ' ')" || warn "no token shards yet (data)"
-    [[ -f "$THIS_HOME/ONBOARDING.md" ]] && ok "ONBOARDING.md written" || warn "no ONBOARDING.md (students)"
+    [[ -f "$THIS_HOME/onboarding/ONBOARDING.md" ]] && ok "onboarding/ONBOARDING.md written" || warn "no onboarding/ONBOARDING.md (students)"
     have_slurm && { printf '\nyour jobs:\n'; squeue -u "$USER" -o "%.10i %-18j %-12P %.10T %.10M %R" 2>/dev/null | head -8; }
 }
 

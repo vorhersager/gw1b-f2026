@@ -7,9 +7,10 @@ tokenization (~2–3 h in Slurm jobs).
 
 ## Before you start: what HPC support has confirmed, and what is still open
 
-Confirmed by HPC staff 9/28–10/1 (details in [CLUSTER_FACTS.md](CLUSTER_FACTS.md)): the class Unix group `gw1b-class`
-(your account is in it since 10/1), the group directory `/SEAS/groups/gw1b` (HPC may move the class to their new
-"Research NAS" layout — use the path they send) and the scratch directory `/scratch/gw1b-class` (GPFS — **Lustre is
+Confirmed by HPC staff 9/28–10/1 (details in [CLUSTER_FACTS.md](CLUSTER_FACTS.md)): the class Unix group `MG-gw1b-class`
+(`groups` shows it; your account is in it since 10/1), the group directory `/SEAS/groups/gw1b` (not created yet on 10/2 —
+HPC may move the class to their new "Research NAS" layout; use `/scratch/gw1b-class/group` until they send the path) and
+the scratch directory `/scratch/gw1b-class` (GPFS — **Lustre is
 gone**; purges are age-based and announced); one `gpu` partition for all GPU nodes with the GPU model chosen by GRES
 type (`--gres=gpu:a100:8`), 7-day wall time, **no `--account`, no QOS, no per-user limits, no preemption**; `module
 load apptainer` (1.3.0) but **no fakeroot**, so the image is pulled from GHCR instead of built on Pegasus; drivers ≥ 570
@@ -40,18 +41,18 @@ bash gw1b-f2026/bin/gw1b-admin all                # asks: group dir, scratch dir
 
 | step | what it does | needs you for |
 |---|---|---|
-| `init` | writes paths + class group into `gw1b.env`; copies the repo to `$GW1B_GROUP/gw1b-f2026` (students must read it from there); creates the directory layout on group storage and scratch; sets group permissions; fixes executable bits / CRLF if the checkout came from Windows | confirming four paths |
-| `discover` | `sinfo`/`sacctmgr`/`sbatch --test-only` → confirms the `gpu`/`cpu` partitions, reads the GPU **GRES type names** (v100/a100/l40s/rtx6000) and the `gpu` wall-time limit, whether `--account` is required, apptainer (module), login-node internet; a 3-minute `srun` on one V100 reads the **driver version** (must be ≥ 525) and checks compute-node internet; writes everything into `gw1b.env` and `docs/CLUSTER_FACTS.generated.md` | nothing |
+| `init` | writes paths + class group into `gw1b.local.env` (git-ignored; `gw1b.env` keeps the defaults, so `git pull` never conflicts); copies the repo to `$GW1B_GROUP/gw1b-f2026` (students must read it from there); creates the directory layout on group storage and scratch; sets group permissions; fixes executable bits / CRLF if the checkout came from Windows | confirming four paths |
+| `discover` | `sinfo`/`sacctmgr`/`sbatch --test-only` → confirms the `gpu`/`cpu` partitions, reads the GPU **GRES type names** (v100/a100/l40s/rtx6000) and the `gpu` wall-time limit, whether `--account` is required, apptainer (module), login-node internet; a 3-minute `srun` on one V100 reads the **driver version** (must be ≥ 525) and checks compute-node internet; writes everything into `gw1b.local.env` and `docs/CLUSTER_FACTS.generated.md` | nothing |
 | `build` | pulls the GitHub-built image into `$GW1B_GROUP/sif/gw1b-2026.09.sif` (`apptainer build … docker://`, no privileges needed); builds from `env/gw1b.def` where fakeroot exists; or the shared venv when there is no apptainer | 10–20 min wait |
-| `test` | import check, the CPU test suite inside the environment, then `gw1b doctor --gpu` (a real GPU job: JAX sees the GPU, bf16 matmul TFLOP/s, a 60-step training run) | waiting for a GPU |
+| `test` | import check, the CPU test suite inside the environment, then `gw1b doctor --gpu` (a real GPU job: JAX sees the GPU, matmul TFLOP/s in the dtype that GPU supports, a 60-step training run with `model.dtype: auto`) | waiting for a GPU |
 | `data` | submits a chain of `cpu` jobs: download FineWeb-Edu `sample-10BT` (~28 GB) into `$HF_HOME` on scratch → 2 GB tokenizer corpus → tokenizer training (32 cores) → tokenization (40 cores) → `$GW1B_SCRATCH/data/fineweb-edu-10B/{train,val}` + `manifest.json` (on the login node instead if `GW1B_COMPUTE_INTERNET=no`) | nothing; jobs run for 3–4 h |
-| `students` | bakes your paths into `laptop/gw1b-connect.sh|.ps1` and writes `ONBOARDING.md` — the text you send to the class | copy-paste |
+| `students` | writes `onboarding/ONBOARDING.md` (the text you send to the class) and copies of `gw1b-connect.sh|.ps1` with your paths baked in, next to it (`onboarding/` is git-ignored; `laptop/` in the repo already carries the Pegasus defaults) | copy-paste |
 
 Options: `--yes` (no prompts), `--sample 100BT` (the 100B-token corpus later in the semester),
 `--vocab 32000 --type bpe|unigram`, `--skip-download` (parquet files already on scratch, e.g. via Globus),
 `--force` (redo a step whose output exists), `--no-gpu-test`.
 
-When `discover` cannot determine something it says so, and `gw1b.env` is a plain shell file you can edit
+When `discover` cannot determine something it says so, and `gw1b.local.env` is a plain shell file you can edit
 (`VERIFY` marks the lines in question). `gw1b doctor` — the students' check — flags what is still missing.
 
 ## If the image cannot be pulled from GHCR
@@ -78,7 +79,7 @@ HPC staff also offered to build containers on request (send them `env/gw1b.def`)
   so ask HPC for a single-day reservation of a few V100 nodes for each Friday lab (they do those), or have students
   share sessions.
 * **Proxy experiments** (50M–350M, 1–7B tokens): `gw1b train --config configs/100m.yaml --set run.name=…`.
-  V100 (default): `--set model.dtype=float32` (no bf16 tensor cores); `--gpu-type a100|l40s`: bf16 by default.
+  `model.dtype: auto` (the default) trains in float32 on V100s (no bf16 tensor cores) and in bf16 on A100/L40S/GH200.
   Everyone runs `gw1b budget` before submitting.
 * **The GW-1B run**: `gw1b train --gpus 8 --gpu-type a100 --time 1-00:00:00 --chain 4 --config configs/gw1b_1p15b.yaml`.
   Chained 1-day jobs (HPC: 8-GPU jobs dequeued within 2 days in September; longer requests wait longer) resume from
@@ -105,10 +106,10 @@ HPC staff also offered to build containers on request (send them `env/gw1b.def`)
 # init
 export GW1B_GROUP=/SEAS/groups/gw1b GW1B_SCRATCH=/scratch/gw1b-class
 mkdir -p $GW1B_GROUP/{sif,tokenizer,release} $GW1B_SCRATCH/{data,hf_cache,users,teams,checkpoints,tmp}
-chgrp -R gw1b-class $GW1B_GROUP $GW1B_SCRATCH; chmod -R g+rX,o-rwx $GW1B_GROUP; chmod g+s $GW1B_GROUP/gw1b-f2026
+chgrp -R MG-gw1b-class $GW1B_GROUP $GW1B_SCRATCH; chmod -R g+rX,o-rwx $GW1B_GROUP; chmod g+s $GW1B_GROUP/gw1b-f2026
 chmod 2775 $GW1B_SCRATCH/{users,teams,checkpoints,tmp}; chmod 2755 $GW1B_SCRATCH/{data,hf_cache}
 # discover
-bash slurm/discover_cluster.sh > docs/CLUSTER_FACTS.generated.md     # then edit the VERIFY lines of gw1b.env
+bash slurm/discover_cluster.sh > docs/CLUSTER_FACTS.generated.md     # then put the VERIFY values into gw1b.local.env
 # build
 env/build_sif.sh --from-image ghcr.io/vorhersager/gw1b-f2026:2026.09    # or env/build_venv.sh
 # test

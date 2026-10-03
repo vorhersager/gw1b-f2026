@@ -34,7 +34,7 @@ from .budget import flops_per_token, peak_flops
 from .config import OptimConfig, TrainConfig, config_summary, load_config, save_config
 from .data import BatchLoader, TokenDataset
 from .model import count_params, cross_entropy
-from .sharding import create_model, describe_devices, init_distributed, make_mesh, put_batch
+from .sharding import create_model, describe_devices, describe_dtype, init_distributed, make_mesh, put_batch, resolve_config
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +172,8 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
     is_main = jax.process_index() == 0
     mesh = make_mesh()
     n_devices = jax.device_count()
+    dtype_note = describe_dtype(cfg)
+    cfg = resolve_config(cfg)  # model.dtype "auto" -> what this GPU supports; saved below so the run records it
     total_steps = cfg.resolved_total_steps()
     run_dir = os.path.join(cfg.run.out_dir, cfg.run.name)
     ckpt_dir = os.path.join(run_dir, "checkpoints")
@@ -180,6 +182,7 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
         save_config(cfg, os.path.join(run_dir, "config.yaml"))
         print(f"[train] run dir: {run_dir}")
         print(f"[train] {describe_devices()}" + (" (multi-process)" if distributed else ""))
+        print(f"[train] {dtype_note}")
         print("[train] " + config_summary(cfg).replace("\n", "\n[train] "))
 
     # ---- model / optimizer -------------------------------------------------
@@ -332,8 +335,9 @@ def main(argv: list[str] | None = None) -> None:
         print(config_summary(cfg))
         from .budget import estimate, format_estimate
         for gpu in ("v100", "a100"):
+            dtype = cfg.model.dtype if cfg.model.dtype != "auto" else ("float32" if gpu == "v100" else "bfloat16")
             print(format_estimate(estimate(cfg.model.n_params, cfg.resolved_total_steps() * cfg.tokens_per_step, gpu, 8,
-                                           dtype=cfg.model.dtype, n_layers=cfg.model.n_layers,
+                                           dtype=dtype, n_layers=cfg.model.n_layers,
                                            seq_len=cfg.data.seq_len, d_model=cfg.model.d_model)))
         return
     train(cfg, resume=not a.no_resume)

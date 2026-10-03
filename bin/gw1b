@@ -258,6 +258,8 @@ cmd_doctor() {
     local ok=1
     check() { if eval "$2"; then printf '  [ok]   %s\n' "$1"; else printf '  [FAIL] %s\n' "$1"; ok=0; fi; }
     echo "GW1B doctor (v$GW1B_ENV_VERSION) — $(hostname -s), $(date)"
+    if [[ -f "$GW1B_HOME/gw1b.local.env" ]]; then check "config: $GW1B_HOME/gw1b.env + gw1b.local.env (site values)" 'true'
+    else check "config: $GW1B_HOME/gw1b.env only — no gw1b.local.env, so these are the shipped defaults (instructor: gw1b-admin init)" 'false'; fi
     check "group dir $GW1B_GROUP exists"               '[[ -d "$GW1B_GROUP" ]]'
     check "scratch dir $GW1B_SCRATCH is writable"      '[[ -d "$GW1B_SCRATCH" && -w "$GW1B_SCRATCH" ]] || mkdir -p "$USER_DIR" 2>/dev/null'
     check "gw1b package readable at $GW1B_HOME"        '[[ -f "$GW1B_HOME/gw1b/train.py" ]]'

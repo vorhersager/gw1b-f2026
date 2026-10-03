@@ -36,7 +36,8 @@ class ModelConfig:
     norm_eps: float = 1e-5
     tie_embeddings: bool = True
     # --- numerics ------------------------------------------------------------
-    dtype: str = "bfloat16"      # compute dtype (bf16 on A100/L40S/H100; use float32 on V100 for speed)
+    dtype: str = "auto"          # compute dtype: "auto" = bfloat16 on GPUs that have it (A100/L40S/H100/Blackwell),
+                                 # float32 on V100 and CPU (no bf16 tensor cores) | "bfloat16" | "float16" | "float32"
     param_dtype: str = "float32" # master weights
     init_std: float = 0.02
     attn_implementation: str = "auto"  # "auto" | "xla" | "cudnn"  (cudnn = flash attention, Ampere+ only)
@@ -233,6 +234,9 @@ def _validate(cfg: TrainConfig) -> None:
     assert m.norm in ("rmsnorm", "layernorm")
     assert m.pos in ("rope", "learned")
     assert m.head_dim % 2 == 0, "head_dim must be even for RoPE"
+    assert m.dtype in ("auto", "bfloat16", "float16", "float32"), f"model.dtype={m.dtype!r}: auto|bfloat16|float16|float32"
+    assert m.param_dtype in ("float32", "bfloat16", "float16"), f"model.param_dtype={m.param_dtype!r}"
+    assert m.attn_implementation in ("auto", "xla", "cudnn"), f"model.attn_implementation={m.attn_implementation!r}"
     assert cfg.data.seq_len <= m.max_seq_len, "data.seq_len must be <= model.max_seq_len"
     assert cfg.run.batch_size % cfg.optim.grad_accum == 0, "batch_size must be divisible by grad_accum"
     assert cfg.optim.schedule in ("cosine", "wsd", "constant", "linear")

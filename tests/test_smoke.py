@@ -52,6 +52,38 @@ def test_kv_cache_matches_full_forward():
     assert jnp.allclose(jnp.concatenate([lg, lg2], 1), full, atol=1e-4)
 
 
+def test_dtype_auto_and_v100_attention_fallback(monkeypatch):
+    """`dtype: auto` is float32 on CPU; on a GPU without bf16 dots (V100) attention is computed in f32."""
+    from gw1b import model as model_lib
+    from gw1b.sharding import describe_dtype, resolve_config
+    from gw1b.config import TrainConfig
+    assert ModelConfig().dtype == "auto"
+    cfg = ModelConfig(**{**TINY, "dtype": "auto"})
+    assert model_lib.resolve_dtype(cfg).dtype == "float32"          # CPU: no bf16 hardware
+    assert GW1BModel(cfg, rngs=nnx.Rngs(0)).cfg.dtype == "float32"  # the model stores the resolved config
+    assert resolve_config(TrainConfig(model=cfg)).model.dtype == "float32"
+    assert "auto -> float32" in describe_dtype(TrainConfig(model=cfg))
+    with pytest.raises(AssertionError):
+        load_config(None, ["model.dtype=fp8"])
+
+    # bf16 model: the fallback (what a V100 gets) must give the same attention as the regular XLA path
+    bf = ModelConfig(**{**TINY, "dtype": "bfloat16"})
+    model = GW1BModel(bf, rngs=nnx.Rngs(0))
+    toks = jax.random.randint(jax.random.key(2), (2, 16), 0, bf.vocab_size)
+    regular = model(toks)
+    lowered = nnx.jit(lambda m, t: m(t)).lower(model, toks).as_text()
+    assert "lhs_precision_type = bf16" in lowered                   # the explicit BF16_BF16_F32 dot algorithm ...
+    monkeypatch.setattr(model_lib, "xla_bf16_dot_supported", lambda: False)
+    lowered = nnx.jit(lambda m, t: m(t)).lower(model, toks).as_text()
+    assert "lhs_precision_type = bf16" not in lowered               # ... is gone on a V100 (it does not compile there)
+    fallback = model(toks)
+    cache = model.init_cache(2, 16)
+    decoded, _ = model(toks, cache=cache, pos=0)
+    assert regular.dtype == fallback.dtype == jnp.float32
+    assert jnp.allclose(regular, fallback, atol=5e-2, rtol=5e-2)   # bf16 rounding differs slightly
+    assert jnp.allclose(decoded, fallback, atol=5e-2, rtol=5e-2)
+
+
 def test_sharded_training_step_reduces_loss():
     from jax.sharding import AxisType, NamedSharding, PartitionSpec as P
     import optax

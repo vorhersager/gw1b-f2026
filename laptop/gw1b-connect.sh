@@ -8,7 +8,7 @@
 # Press Ctrl-C to close the tunnel (the job keeps running until its time limit or `gw1b cancel`).
 # Requires: ssh, and VPN if you are off campus. You will be asked for your GW password / 2FA.
 set -euo pipefail
-GW1B_HOME_REMOTE="${GW1B_HOME_REMOTE:-/SEAS/groups/gw1b/gw1b-f2026}"     # <- instructor: set once
+GW1B_HOME_REMOTE="${GW1B_HOME_REMOTE:-/scratch/gw1b-class/group/gw1b-f2026}"     # <- instructor: set once
 LOGIN_HOST="${GW1B_LOGIN_HOST:-pegasus.arc.gwu.edu}"
 LOCAL_PORT="${GW1B_LOCAL_PORT:-8888}"
 

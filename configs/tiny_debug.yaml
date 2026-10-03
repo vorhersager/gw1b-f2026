@@ -8,7 +8,7 @@ model:
   head_dim: 32
   d_ff: 512
   max_seq_len: 128
-  dtype: float32
+  dtype: auto          # float32 on CPU and V100, bf16 on A100/L40S/GH200
 data:
   train_dir: ${GW1B_SCRATCH}/data/synthetic/train
   val_dir: ${GW1B_SCRATCH}/data/synthetic/val
