@@ -147,8 +147,9 @@ cmd_discover() {
     load_env; load_module_system
     have_slurm || die "no Slurm commands here — run this on a Pegasus login node"
     local facts="$THIS_HOME/docs/CLUSTER_FACTS.generated.md"
-    info "full dump (for the record, includes a 3-minute GPU-node probe) -> $facts"
-    GW1B_HOME="$THIS_HOME" bash "$THIS_HOME/slurm/discover_cluster.sh" > "$facts" 2>&1 || true
+    if [[ "$GPU_TEST" == 1 ]]; then info "full dump -> $facts  (about 1 minute, plus up to 2 minutes waiting for a free GPU)"
+    else info "full dump -> $facts  (about 1 minute; GPU probe skipped)"; fi
+    GW1B_HOME="$THIS_HOME" GW1B_DISCOVER_GPU_PROBE="$GPU_TEST" bash "$THIS_HOME/slurm/discover_cluster.sh" > "$facts" || true
 
     # --- partitions: Pegasus has ONE gpu partition; GPU models are GRES types -------------------
     local parts; parts="$(sinfo -h -o '%P' | tr -d '*' | sort -u | tr '\n' ' ')"
@@ -229,8 +230,8 @@ cmd_discover() {
 
     # --- GPU node probe: driver version decides whether the CUDA 12 wheels run -------------
     if [[ "$GPU_TEST" == 1 ]]; then
-        info "probing a $GW1B_GPU_DEFAULT node on $GW1B_PART_GPU (waits for a free GPU, up to 5 minutes)..."
-        local -a sflags=("--partition=$GW1B_PART_GPU" "--gres=$gres:1" "--time=00:03:00" "--job-name=gw1b-probe")
+        info "probing a $GW1B_GPU_DEFAULT node on $GW1B_PART_GPU (gives up if no GPU is free within 2 minutes)..."
+        local -a sflags=("--partition=$GW1B_PART_GPU" "--gres=$gres:1" "--time=00:03:00" "--job-name=gw1b-probe" "--immediate=120")
         [[ -n "${GW1B_ACCOUNT:-}" ]] && sflags+=("--account=$GW1B_ACCOUNT")
         local probe
         probe="$(timeout 330 srun "${sflags[@]}" bash -c 'nvidia-smi --query-gpu=driver_version,name,memory.total,compute_cap --format=csv,noheader | head -1; echo "CTR:$(command -v apptainer || command -v singularity || echo none)"; echo "NET:$(curl -s -o /dev/null -w %{http_code} --max-time 6 https://huggingface.co || echo ERR)"' 2>/dev/null)"
