@@ -18,7 +18,7 @@ the machine-readable parts and writes them into `gw1b.env`.
 | NVIDIA drivers | V100: proprietary branch 575.57.08 → 580. A100/L40S/GH200: open branch, minimum 570.133.20, drifting upward (6xx series appearing). All ≥ 525 → the CUDA 12 wheels run everywhere. V100 = CUDA 12 max; newer GPUs also CUDA 13 |
 | Apptainer | `module load apptainer` (1.3.0, newer version coming); **no subuid/subgid → no `--fakeroot` builds**; `--nv` works; bring images as SIF, or ask HPC to build |
 | scratch | **Lustre is retired.** Scratch is GPFS at `/scratch/<group>` (e.g. `/scratch/gw1b-class`), 2 PB shared (79 % used on 9/30). Purges are age-based, ad hoc when usage grows, always announced in advance, exceptions reviewed — our files are "unlikely to be impacted" |
-| group storage | `/SEAS/groups/gw1b` is the default; HPC may set the class up in the new **Research NAS** layout instead (path to follow). Quotas are per school (SEAS, shared), not per group; our ~1 TB "should not be problematic". Home quotas are per user |
+| group storage | **`/SEAS/groups/gw1b-class`** (created by HPC on 10/3; before that `/scratch/gw1b-class/group` was the stand-in). Quotas are per school (SEAS, shared), not per group; our ~1 TB "should not be problematic". Home quotas are per user |
 | Unix group | **`MG-gw1b-class`** (what `groups` prints on Pegasus; HPC called it `gw1b-class` in email) — owns `/scratch/gw1b-class` (`root:MG-gw1b-class`, mode 2770, created 10/1) |
 | compute-node internet | yes, compute nodes download freely (so data jobs run on `cpu` nodes, W&B can be online) |
 | inter-node network | V100/A100 nodes: **100 Gb/s EDR InfiniBand** (HCA `mlx5_0`, IPoIB `ib0`) + 10 GbE (`eno0`); traffic between compute nodes open; **GPUDirect RDMA not loaded by default**, no GPUDirect Storage; the Blackwell nodes get 25 GbE + a separate 400 Gb/s NDR fabric — mixed old/new jobs fall back to Ethernet |
@@ -32,9 +32,6 @@ the machine-readable parts and writes them into `gw1b.env`.
 
 ## Still open
 
-* The Research NAS group path (HPC will send it) — then set `GW1B_GROUP` in `gw1b.env` and move `sif/`, `tokenizer/` and the
-  repository there. Until then the class uses `/scratch/gw1b-class/group` as the "persistent" directory (`/SEAS/groups/gw1b`
-  does not exist yet and cannot be created by us).
 * GRES type names: `v100` is confirmed (`gw1b doctor`, 10/2: the smoke test ran on `gpu023`, a Tesla V100-SXM2-16GB with driver
   575.57.08, compute capability 7.0). Still to read off `sinfo -o "%N %G"`: L40S, GH200 and the Blackwell nodes (and their arrival date).
 * HPC's decision on Friday-lab reservations, and whether a written proposal for a partial A100 reservation is worth sending.

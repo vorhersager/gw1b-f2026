@@ -10,9 +10,9 @@ GITHUB_BRANCH = "main"
 
 SETUP = '''# --- GW1B setup cell (same in every notebook) -------------------------------------------------
 import os, sys, json, time, pathlib
-GW1B_HOME    = os.environ.get("GW1B_HOME", "/scratch/gw1b-class/group/gw1b-f2026")
+GW1B_HOME    = os.environ.get("GW1B_HOME", "/SEAS/groups/gw1b-class/gw1b-f2026")
 GW1B_SCRATCH = os.environ.get("GW1B_SCRATCH", "/scratch/gw1b-class")
-GW1B_GROUP   = os.environ.get("GW1B_GROUP", "/scratch/gw1b-class/group")
+GW1B_GROUP   = os.environ.get("GW1B_GROUP", "/SEAS/groups/gw1b-class")
 if not os.path.isdir(GW1B_HOME):
     raise RuntimeError(f"This kernel is not running on Pegasus ({GW1B_HOME} does not exist). In Colab use "
                        "Connect \u25be \u2192 'Connect to a local runtime' and paste the URL printed by `gw1b jupyter` "
@@ -71,7 +71,7 @@ print(f"matmul throughput: {2 * 4096**3 / dt / 1e12:.1f} TFLOP/s  (A100 bf16 pea
 
 | what | where | notes |
 |---|---|---|
-| shared environment, code, tokenizer | `$GW1B_GROUP` (currently `/scratch/gw1b-class/group`) | persistent, read-only for students |
+| shared environment, code, tokenizer | `$GW1B_GROUP` (`/SEAS/groups/gw1b-class`) | persistent, read-only for students |
 | datasets, HF cache, checkpoints | `$GW1B_SCRATCH` (`/scratch/gw1b-class`) | fast GPFS, **not backed up** — copy results out |
 | your experiments | `$GW1B_SCRATCH/users/<netid>/runs/<run name>` | `config.yaml`, `metrics.jsonl`, `checkpoints/`, `summary.json` |
 | your home | `~` (25 GB quota) | notebooks, small files only |"""),

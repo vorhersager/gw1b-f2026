@@ -1,4 +1,4 @@
-# Source this on a Pegasus login node:   source /scratch/gw1b-class/group/gw1b-f2026/activate.sh   (fall 2026 path; see ONBOARDING)
+# Source this on a Pegasus login node:   source /SEAS/groups/gw1b-class/gw1b-f2026/activate.sh
 # (or run `gw1b setup` once to add that line to your ~/.bashrc)
 _gw1b_activate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export GW1B_HOME="$_gw1b_activate_dir"

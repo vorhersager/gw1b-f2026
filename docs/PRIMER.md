@@ -106,7 +106,7 @@ never log into directly, shared file systems, and a scheduler that hands compute
 | **login node** | a small shared machine for editing, submitting jobs, light scripts | never train here; `gw1b python` is for dry runs and `gw1b budget` only |
 | **compute node** | a machine with the GPUs/CPUs your job asked for, yours for the job's duration | everything heavy runs here, via Slurm |
 | **home** `~` | your private, small, backed-up directory | code, notebooks, settings — not datasets |
-| **group storage** `/scratch/gw1b-class/group` for now (the `/SEAS/groups` or Research NAS path once HPC assigns it) | persistent, shared by the class | the environment, tokenizer, released checkpoints |
+| **group storage** `/SEAS/groups/gw1b-class` | persistent, shared by the class | the environment, tokenizer, released checkpoints |
 | **scratch** `/scratch/gw1b-class` | fast GPFS file system, 2 PB shared, not backed up, purged by age with notice | datasets, caches, checkpoints, your runs (`users/<netid>`, `teams/teamN`) |
 | **Globus** | a web service for moving large data between Pegasus, GW Box/Drive and your laptop | the 100B-token dataset, release artifacts |
 | **module** | `module load apptainer` makes optional software visible on a node | the environment loads what it needs; you rarely type it |

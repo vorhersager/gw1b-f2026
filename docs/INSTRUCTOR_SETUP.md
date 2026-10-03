@@ -8,8 +8,7 @@ tokenization (~2–3 h in Slurm jobs).
 ## Before you start: what HPC support has confirmed, and what is still open
 
 Confirmed by HPC staff 9/28–10/1 (details in [CLUSTER_FACTS.md](CLUSTER_FACTS.md)): the class Unix group `MG-gw1b-class`
-(`groups` shows it; your account is in it since 10/1), the group directory `/SEAS/groups/gw1b` (not created yet on 10/2 —
-HPC may move the class to their new "Research NAS" layout; use `/scratch/gw1b-class/group` until they send the path) and
+(`groups` shows it; your account is in it since 10/1), the group directory `/SEAS/groups/gw1b-class` (created by HPC on 10/3) and
 the scratch directory `/scratch/gw1b-class` (GPFS — **Lustre is
 gone**; purges are age-based and announced); one `gpu` partition for all GPU nodes with the GPU model chosen by GRES
 type (`--gres=gpu:a100:8`), 7-day wall time, **no `--account`, no QOS, no per-user limits, no preemption**; `module
@@ -67,7 +66,7 @@ docker build -t gw1b -f env/Dockerfile env
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/output --privileged \
     quay.io/singularity/docker2singularity:v4.1.0 --name gw1b-2026.09.sif gw1b
 # copy with scp or Globus, then:
-ssh pegasus 'ln -sfn gw1b-2026.09.sif /scratch/gw1b-class/group/sif/gw1b.sif'
+ssh pegasus 'ln -sfn gw1b-2026.09.sif /SEAS/groups/gw1b-class/sif/gw1b.sif'
 ```
 HPC staff also offered to build containers on request (send them `env/gw1b.def`). Last resort: the shared venv
 (`gw1b-admin build venv`): same lock file, same versions, no container.
@@ -99,12 +98,27 @@ HPC staff also offered to build containers on request (send them `env/gw1b.def`)
 * **W&B**: compute nodes have internet, but `WANDB_MODE=offline` stays the default (no accounts needed); teams that
   want live dashboards export `WANDB_MODE=online WANDB_API_KEY=…`. TensorBoard needs no internet (port 6006 is in the tunnel).
 * **Where each team plugs in**: [TEAM_PLAYBOOK.md](TEAM_PLAYBOOK.md).
+* **Moving the group directory** (done once on 10/3, from the stand-in `/scratch/gw1b-class/group` to
+  `/SEAS/groups/gw1b-class`; the same steps apply if HPC ever moves the class again):
+  ```bash
+  gw1b jupyter --stop; gw1b cancel all                      # nothing may be using the old paths
+  cd /SEAS/groups/gw1b-class && git clone https://github.com/vorhersager/gw1b-f2026.git
+  mv /scratch/gw1b-class/group/sif   /SEAS/groups/gw1b-class/sif      # the 7 GB image (copies across file systems)
+  mv /scratch/gw1b-class/group/tools /SEAS/groups/gw1b-class/tools    # pytest installed beside the environment
+  mv /scratch/gw1b-class/group/tokenizer /SEAS/groups/gw1b-class/     # once a tokenizer exists; same for release/
+  bash /SEAS/groups/gw1b-class/gw1b-f2026/bin/gw1b-admin init        # writes gw1b.local.env, layout, group permissions
+  sed -i 's|/scratch/gw1b-class/group/gw1b-f2026/activate.sh|/SEAS/groups/gw1b-class/gw1b-f2026/activate.sh|' ~/.bashrc
+  exec bash && gw1b kernel && gw1b doctor --gpu                       # fresh shell; kernelspec + smoke test on the new paths
+  mv /scratch/gw1b-class/group /scratch/gw1b-class/group.old         # delete after a week
+  ```
+  Everyone who ran `gw1b setup` before the move needs the same `sed` on their `~/.bashrc` (and `gw1b kernel` again);
+  the laptop scripts in the repo already default to the new path.
 
 ## Manual reference (what `gw1b-admin` does, for the record)
 
 ```bash
 # init
-export GW1B_GROUP=/scratch/gw1b-class/group GW1B_SCRATCH=/scratch/gw1b-class   # (the Research NAS path once HPC sends it)
+export GW1B_GROUP=/SEAS/groups/gw1b-class GW1B_SCRATCH=/scratch/gw1b-class
 mkdir -p $GW1B_GROUP/{sif,tokenizer,release} $GW1B_SCRATCH/{data,hf_cache,users,teams,checkpoints,tmp}
 chgrp -R MG-gw1b-class $GW1B_GROUP $GW1B_SCRATCH; chmod -R g+rX,o-rwx $GW1B_GROUP; chmod g+s $GW1B_GROUP/gw1b-f2026
 chmod 2775 $GW1B_SCRATCH/{users,teams,checkpoints,tmp}; chmod 2755 $GW1B_SCRATCH/{data,hf_cache}

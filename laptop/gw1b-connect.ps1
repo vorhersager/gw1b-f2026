@@ -8,7 +8,7 @@ param(
     [Parameter(Mandatory = $true, Position = 0)] [string] $NetId,
     [Parameter(ValueFromRemainingArguments = $true)] [string[]] $JupyterArgs
 )
-$GW1B_HOME_REMOTE = if ($env:GW1B_HOME_REMOTE) { $env:GW1B_HOME_REMOTE } else { "/scratch/gw1b-class/group/gw1b-f2026" }   # <- instructor: set once
+$GW1B_HOME_REMOTE = if ($env:GW1B_HOME_REMOTE) { $env:GW1B_HOME_REMOTE } else { "/SEAS/groups/gw1b-class/gw1b-f2026" }   # <- instructor: set once
 $LoginHost = if ($env:GW1B_LOGIN_HOST) { $env:GW1B_LOGIN_HOST } else { "pegasus.arc.gwu.edu" }
 $LocalPort = if ($env:GW1B_LOCAL_PORT) { $env:GW1B_LOCAL_PORT } else { "8888" }
 
