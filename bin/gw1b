@@ -177,7 +177,33 @@ wait_and_print() {
     local f="$USER_DIR/jobs/jupyter-$id.json" n=0
     while [[ ! -s "$f" && $n -lt 60 ]]; do sleep 2; n=$((n + 1)); done
     [[ -s "$f" ]] || die "Jupyter did not write its connection file; check $USER_DIR/jobs/gw1b-jupyter-$id.out"
+    # JupyterLab needs 20-90 s to come up inside the container: a tunnel opened before that gets
+    # "channel N: open failed: connect failed: Connection refused". Wait until the port answers.
+    local node port log="$USER_DIR/jobs/gw1b-jupyter-$id.out"
+    node="$(sed -n 's/.*"node": "\([^"]*\)".*/\1/p' "$f")"; port="$(sed -n 's/.*"port": \([0-9]*\).*/\1/p' "$f")"
+    info "JupyterLab is starting on $node:$port — waiting until it answers..."
+    n=0
+    while ! port_open "$node" "$port"; do
+        if ! squeue -j "$id" -h -o %T 2>/dev/null | grep -q RUNNING; then
+            printf '\n'; tail -n 15 "$log" 2>/dev/null; die "job $id ended before JupyterLab was up — see $log"
+        fi
+        if [[ $n -ge 180 ]]; then
+            printf '\n'; tail -n 15 "$log" 2>/dev/null
+            info "JupyterLab is still not answering after 3 minutes (log above: $log). Try the steps below anyway, or 'gw1b cancel $id'."
+            break
+        fi
+        sleep 3; n=$((n + 3))
+    done
+    [[ $n -lt 180 ]] && info "JupyterLab answers on $node:$port"
     print_jupyter_info "$id"
+}
+
+port_open() {  # port_open HOST PORT -> true when something accepts TCP connections there (bash /dev/tcp, else curl/nc)
+    local host="$1" port="$2"
+    if timeout 3 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then return 0; fi
+    if command -v curl >/dev/null 2>&1; then curl -s -m 3 -o /dev/null "http://$host:$port/" 2>/dev/null && return 0; fi
+    if command -v nc >/dev/null 2>&1; then nc -z -w 3 "$host" "$port" 2>/dev/null && return 0; fi
+    return 1
 }
 
 print_jupyter_info() {
@@ -185,9 +211,10 @@ print_jupyter_info() {
     local node port token lport
     node="$(sed -n 's/.*"node": "\([^"]*\)".*/\1/p' "$f")"; port="$(sed -n 's/.*"port": \([0-9]*\).*/\1/p' "$f")"
     token="$(sed -n 's/.*"token": "\([^"]*\)".*/\1/p' "$f")"; lport="$(sed -n 's/.*"local_port": \([0-9]*\).*/\1/p' "$f")"
+    local reach="answering"; port_open "$node" "$port" || reach="NOT answering yet (starting? see $USER_DIR/jobs/gw1b-jupyter-$1.out)"
     cat <<EOF
 
-  Jupyter job $1 is RUNNING on $node (GPU node).  Time limit: $(squeue -j "$1" -h -o %L) left.
+  Jupyter job $1 is RUNNING on $node (GPU node), JupyterLab on port $port is $reach.  Time limit: $(squeue -j "$1" -h -o %L) left.
 
   1) On YOUR LAPTOP, in a new terminal (keep it open):
        ssh -N -L $lport:$node:$port -L 6006:$node:6006 $USER@$GW1B_LOGIN_HOST

@@ -67,6 +67,13 @@ shorter `--time`. `gw1b status` shows free GPUs per partition.
 **Jupyter connects but kernels die / `import gw1b` fails** — you are probably in an Open OnDemand or hosted-Colab kernel,
 not the GW1B one. Use the URL printed by `gw1b jupyter`, or `gw1b kernel` and select *GW1B (JAX)* as the kernel.
 
+**The tunnel terminal prints `channel N: open failed: connect failed: Connection refused`** — the login node reached the
+GPU node, but nothing is listening on the Jupyter port there (yet). JupyterLab needs 20–90 s to start inside the
+container; `gw1b jupyter` now waits for it before printing the tunnel line, and `gw1b jupyter --info` says whether the
+port is *answering*. If it stays refused: `tail -n 30 $GW1B_SCRATCH/users/$USER/jobs/gw1b-jupyter-<jobid>.out` — a
+JupyterLab error there (port in use, unwritable `~/.jupyter`, …) means the job died; `gw1b cancel <jobid>` and start again.
+The tunnel itself can stay open; just reload the browser tab / click Connect again once the port answers.
+
 **Colab: "Unable to connect to the runtime"** — see [COLAB.md](COLAB.md): the tunnel terminal must stay open; paste the
 URL with the token; try the JupyterLab URL in a browser tab first.
 

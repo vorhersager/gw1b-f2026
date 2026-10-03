@@ -56,6 +56,10 @@ interface on a random port with a random 48-hex-character token. Only your ssh t
 
 * *"Unable to connect to the runtime"* — is the tunnel terminal still open? Did you paste the URL **with** the token?
   Try the JupyterLab URL in a normal browser tab first; if that works, Colab will too.
+* *The tunnel terminal says `channel N: open failed: connect failed: Connection refused`* — JupyterLab is not listening
+  on the GPU node yet (it takes up to a minute or two to start) or its job ended. `gw1b jupyter --info` tells you
+  whether the port is answering; the job log is `$GW1B_SCRATCH/users/$USER/jobs/gw1b-jupyter-<jobid>.out`. Keep the
+  tunnel open and retry once it answers.
 * *Connected, but the notebook cannot see `gw1b`* — the kernel started outside the environment. In Colab pick
   **Runtime → Change runtime type** and make sure you are connected to the local runtime (not a hosted one);
   the first notebook cell (`00_hello_pegasus`) prints the JAX devices as a check.

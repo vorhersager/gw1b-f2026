@@ -9,7 +9,15 @@ source "$GW1B_HOME/gw1b.env"
 
 user_dir="$GW1B_SCRATCH/users/$USER"
 mkdir -p "$user_dir/jobs" "$user_dir/runs"
-port=$((8800 + RANDOM % 200))
+pick_port() {  # a random port in 8800-9999 that nothing on this (shared) node listens on
+    local p i
+    for i in $(seq 1 30); do
+        p=$((8800 + RANDOM % 1200))
+        if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then echo "$p"; return; fi
+    done
+    echo $((8800 + RANDOM % 1200))
+}
+port="$(pick_port)"
 token="$(python3 -c 'import secrets; print(secrets.token_hex(24))' 2>/dev/null || od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 node="$(hostname -s)"
 info="$user_dir/jobs/jupyter-$SLURM_JOB_ID.json"
@@ -41,6 +49,8 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv 2>/dev/null
 
 # --ServerApp.allow_origin / allow_credentials: what Google Colab needs to talk to a local runtime.
 # --ip=0.0.0.0 + random token: reachable from the login node through the ssh tunnel only.
+# JupyterLab takes 20-90 s to come up in the container; `gw1b jupyter` waits for the port before printing the tunnel line.
+echo "$(date +%T) starting JupyterLab (first start can take a minute or two) ..."
 exec "$GW1B_HOME/bin/gw1b-exec" jupyter lab --no-browser --ip=0.0.0.0 --port="$port" \
     --ServerApp.token="$token" --ServerApp.port_retries=0 \
     --ServerApp.allow_origin='https://colab.research.google.com' --ServerApp.allow_credentials=True \
