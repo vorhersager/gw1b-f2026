@@ -49,6 +49,7 @@ ask() {  # ask VAR "prompt" default
     printf -v "$var" '%s' "${reply:-$default}"
 }
 confirm() { [[ "$YES" == 1 ]] && return 0; local r; read -r -p "  $1 [Y/n]: " r; [[ -z "$r" || "$r" =~ ^[Yy] ]]; }
+confirm_n() { [[ "$YES" == 1 ]] && return 1; local r; read -r -p "  $1 [y/N]: " r; [[ "$r" =~ ^[Yy] ]]; }   # default no; never with --yes
 
 env_set() {  # env_set KEY VALUE  -> records   export KEY="value"   in gw1b.local.env (wins over gw1b.env and over stale shell values)
     local key="$1" value="$2"
@@ -118,25 +119,32 @@ cmd_init() {
     load_env
     local group scratch ugroup host
     local ugroup_guess; ugroup_guess="$(id -Gn | tr ' ' '\n' | grep -i -m1 gw1b || id -gn)"
-    ask group   "Persistent group directory (NOT purged)" "${GW1B_GROUP}"
-    ask scratch "Scratch directory (GPFS /scratch/<group>; not backed up)" "${GW1B_SCRATCH}"
+    # the group dir is where this checkout lives (students read the repo from $GW1B_GROUP/gw1b-f2026); the
+    # defaults of gw1b.env only apply when the checkout is somewhere temporary
+    local group_guess="$GW1B_GROUP"
+    [[ -f "$LOCAL_ENV" ]] || [[ "$(basename "$THIS_HOME")" != gw1b-f2026 ]] || group_guess="$(dirname "$THIS_HOME")"
+    info "the group directory holds this repository, sif/ (the container), tokenizer/ and release/; scratch holds data, caches and runs"
+    ask group   "Persistent group directory (this checkout lives in it; NOT purged)" "$group_guess"
+    ask scratch "Scratch directory (GPFS /scratch/<group>; data, caches, runs)" "${GW1B_SCRATCH}"
     ask ugroup  "Unix group of the class (students are members)" "${ugroup_guess:-$GW1B_UNIX_GROUP}"
     ask host    "Login host students ssh to" "${GW1B_LOGIN_HOST}"
-    env_set GW1B_GROUP "$group"; env_set GW1B_SCRATCH "$scratch"; env_set GW1B_UNIX_GROUP "$ugroup"; env_set GW1B_LOGIN_HOST "$host"
-    load_env
 
     # the repository must live in the group dir so students can read it
-    local target="$GW1B_GROUP/gw1b-f2026"
+    local target="$group/gw1b-f2026"
     if [[ "$(readlink -f "$THIS_HOME")" != "$(readlink -f "$target" 2>/dev/null || echo "$target")" ]]; then
-        warn "this checkout is $THIS_HOME, students need it at $target"
-        if confirm "copy it there now?"; then
-            mkdir -p "$GW1B_GROUP" || die "cannot create $GW1B_GROUP (ask HPC support for the group directory)"
+        warn "this checkout is $THIS_HOME, but with that group directory students would read it from $target"
+        if ! confirm_n "copy the checkout to $target and continue there? (no = use $(dirname "$THIS_HOME") as the group directory)"; then
+            group="$(dirname "$THIS_HOME")"; info "group directory set to $group"
+        else
+            mkdir -p "$group" || die "cannot create $group (ask HPC support for the group directory)"
             cp -r "$THIS_HOME" "$target" || die "copy failed"
             ok "copied. Re-run:  $target/bin/gw1b-admin all"
             exit 0
         fi
     fi
-    env_set GW1B_HOME "$GW1B_GROUP/gw1b-f2026"
+    env_set GW1B_GROUP "$group"; env_set GW1B_SCRATCH "$scratch"; env_set GW1B_UNIX_GROUP "$ugroup"; env_set GW1B_LOGIN_HOST "$host"
+    env_set GW1B_HOME "$group/gw1b-f2026"
+    load_env
 
     # executable bits / line endings (checkout may come from Windows)
     chmod +x "$THIS_HOME"/bin/* "$THIS_HOME"/env/*.sh "$THIS_HOME"/slurm/*.sh "$THIS_HOME"/laptop/*.sh 2>/dev/null
