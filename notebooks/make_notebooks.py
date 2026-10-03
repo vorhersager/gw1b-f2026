@@ -21,6 +21,7 @@ USER_DIR     = os.path.join(GW1B_SCRATCH, "users", os.environ.get("USER", "stude
 os.makedirs(USER_DIR, exist_ok=True)
 if GW1B_HOME not in sys.path:
     sys.path.insert(0, GW1B_HOME)        # the shared gw1b package
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")   # notebooks share one GPU: allocate on demand, not 75 % up front
 import jax, jax.numpy as jnp, numpy as np
 print("JAX", jax.__version__, "| backend:", jax.default_backend(), "| devices:", jax.devices())
 print("your scratch dir:", USER_DIR)

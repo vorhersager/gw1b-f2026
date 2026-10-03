@@ -43,6 +43,13 @@ picks the site values up again.
 3. Was a GPU actually allocated? `echo $CUDA_VISIBLE_DEVICES` inside the job; check `--gres` syntax.
 4. `JAX_PLATFORMS` must not be set to `cpu` (some login-node profiles do that).
 
+**`CUDA_ERROR_OUT_OF_MEMORY` in a notebook, even for a tiny model** — another kernel of the same JupyterLab session is
+holding the GPU (each notebook has its own kernel; JAX's default is to reserve 75 % of the GPU memory in the first
+process that uses it). *Kernel → Shut Down All Kernels…* (or close the other notebooks' kernels in the left sidebar),
+then run the notebook again from the top; `!nvidia-smi` in a cell shows who holds the memory. The Jupyter job, the
+`GW1B (JAX)` kernel and the class notebooks now set `XLA_PYTHON_CLIENT_PREALLOCATE=false`, so kernels allocate on
+demand and several notebooks fit on one 16 GB V100 (a kernel still keeps what it has used until it is shut down).
+
 **`RESOURCE_EXHAUSTED: Out of memory`** — reduce `run.batch_size` (keep tokens/step by raising `optim.grad_accum`),
 shorten `data.seq_len`, make sure `run.shard_params=true`, or lower `XLA_PYTHON_CLIENT_MEM_FRACTION`. On 16 GB V100s a
 350M model needs batch ≤ 8 sequences of 2048 per GPU.

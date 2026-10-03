@@ -47,6 +47,11 @@ EOF
 cd "${GW1B_JUPYTER_ROOT:-$HOME}"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv 2>/dev/null || true
 
+# Every notebook gets its own kernel and all of them share this job's GPU(s). JAX would otherwise grab 75 % of
+# the GPU memory in the FIRST kernel that touches it, and the second notebook dies with CUDA_ERROR_OUT_OF_MEMORY.
+# Allocate on demand instead (batch jobs keep JAX's default preallocation: one process per GPU there).
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
 # --ServerApp.allow_origin / allow_credentials: what Google Colab needs to talk to a local runtime.
 # --ip=0.0.0.0 + random token: reachable from the login node through the ssh tunnel only.
 # JupyterLab takes 20-90 s to come up in the container; `gw1b jupyter` waits for the port before printing the tunnel line.

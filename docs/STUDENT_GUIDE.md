@@ -20,6 +20,7 @@ source /SEAS/groups/gw1b/gw1b-f2026/activate.sh      # the path your instructor 
 gw1b setup           # once: adds the line above to ~/.bashrc, creates your scratch folders, copies the notebooks to ~/gw1b
 gw1b doctor          # every line [ok]?
 gw1b kernel          # once: makes the environment selectable in the Open OnDemand Jupyter app
+gw1b notebooks       # later in the semester: refresh ~/gw1b/notebooks from the class repo (your edits are kept as .bak)
 ```
 Help from HPC: Zoom office hours Tue/Thu 12:30–14:30 (https://gwu-edu.zoom.us/j/91295945575) or hpchelp@gwu.edu.
 

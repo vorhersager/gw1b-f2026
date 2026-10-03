@@ -12,6 +12,7 @@
 #   gw1b cancel <jobid|all>         cancel jobs
 #   gw1b doctor [--gpu]             check the setup (add --gpu to run a 3-minute GPU smoke test job)
 #   gw1b kernel                     install a "GW1B" Jupyter kernel for the Pegasus Jupyter app / VS Code
+#   gw1b notebooks                  refresh ~/gw1b/notebooks from the class repo (your edited copies are kept as .bak)
 #
 # Job options (all optional): --gpus N  --gpu-type v100|a100|l40s|gh200|any  --nodes K  --partition NAME  --time D-HH:MM:SS
 #                             --cpus N  --mem 48G  --name NAME  --chain K (resubmit K times for long runs)  --after JOBID  --cpu
@@ -138,7 +139,10 @@ cmd_setup() {
     info "your scratch folder: $USER_DIR   (checkpoints, runs; scratch is not backed up — copy results to $HOME or the group dir)"
     if [[ ! -d "$HOME/gw1b" ]]; then
         mkdir -p "$HOME/gw1b" && cp -r "$GW1B_HOME/notebooks" "$HOME/gw1b/" && cp -r "$GW1B_HOME/configs" "$HOME/gw1b/"
-        info "copied starter notebooks + configs to ~/gw1b/"
+        for f in "$HOME"/gw1b/notebooks/*.ipynb; do cp "$f" "$(dirname "$f")/.$(basename "$f").orig"; done
+        info "copied starter notebooks + configs to ~/gw1b/   (later: 'gw1b notebooks' refreshes them)"
+    else
+        info "~/gw1b exists; 'gw1b notebooks' refreshes the class notebooks there"
     fi
     info "next:  gw1b doctor    then    gw1b jupyter"
 }
@@ -315,6 +319,22 @@ cmd_doctor() {
     [[ "$ok" == 1 ]] && echo "All checks passed." || { echo "Some checks failed — see docs/TROUBLESHOOTING.md"; exit 1; }
 }
 
+cmd_notebooks() {  # copy the current class notebooks into ~/gw1b/notebooks; a student's edited copy is kept as a .bak
+    local src="$GW1B_HOME/notebooks" dst="$HOME/gw1b/notebooks" f name n=0 kept=0
+    mkdir -p "$dst"
+    for f in "$src"/*.ipynb; do
+        name="$(basename "$f")"
+        if [[ -f "$dst/$name" ]] && ! cmp -s "$f" "$dst/$name"; then
+            if ! cmp -s "$dst/$name" "$dst/.$name.orig" 2>/dev/null; then   # edited by the student (differs from the copy we installed)
+                mv "$dst/$name" "$dst/${name%.ipynb}.$(date +%Y%m%d-%H%M).bak.ipynb"; kept=$((kept + 1))
+            fi
+        fi
+        cp "$f" "$dst/$name"; cp "$f" "$dst/.$name.orig"; n=$((n + 1))
+    done
+    cp -r "$GW1B_HOME/configs" "$HOME/gw1b/" 2>/dev/null || true
+    info "$n notebook(s) in $dst are now the class versions$( [[ $kept -gt 0 ]] && echo "; $kept edited copy/copies kept as *.bak.ipynb" )"
+}
+
 cmd_kernel() {
     local dir="$HOME/.local/share/jupyter/kernels/gw1b"
     mkdir -p "$dir"
@@ -323,7 +343,7 @@ cmd_kernel() {
   "argv": ["$GW1B_HOME/bin/gw1b-exec", "python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
   "display_name": "GW1B (JAX, v$GW1B_ENV_VERSION)",
   "language": "python",
-  "env": {"GW1B_HOME": "$GW1B_HOME"}
+  "env": {"GW1B_HOME": "$GW1B_HOME", "XLA_PYTHON_CLIENT_PREALLOCATE": "false"}
 }
 EOF
     info "installed Jupyter kernel 'GW1B (JAX)' at $dir — select it in the Pegasus Jupyter app (it reads this folder) or VS Code"
@@ -359,6 +379,7 @@ case "$cmd" in
     cancel)   cmd_cancel "$@" ;;
     doctor)   cmd_doctor "$@" ;;
     kernel)   cmd_kernel ;;
+    notebooks) cmd_notebooks ;;
     version)  echo "gw1b env $GW1B_ENV_VERSION ($GW1B_HOME)" ;;
     help|-h|--help) usage ;;
     *) die "unknown command '$cmd' (try: gw1b help)" ;;
