@@ -14,6 +14,21 @@ notebooks) while every computation, file and checkpoint stays on Pegasus.
 
 That is it — `!nvidia-smi`, `import jax; jax.devices()`, all the `gw1b` notebooks work unchanged.
 
+## The class notebooks, one click away
+
+Each badge opens the notebook from GitHub in Colab (the repository is public). Then do step 3 above — the
+badge alone gives you a Google-hosted runtime without the class environment; the first cell says so if you
+forget. Colab saves your copy to Drive; the data and checkpoints stay on Pegasus.
+
+| notebook | what it covers | |
+|---|---|---|
+| `00_hello_pegasus` | GPU check, where files live, your compute budget | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/vorhersager/gw1b-f2026/blob/main/notebooks/00_hello_pegasus.ipynb) |
+| `01_tokenizer` | train BPE vs unigram tokenizers, compare compression | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/vorhersager/gw1b-f2026/blob/main/notebooks/01_tokenizer.ipynb) |
+| `02_data_pipeline` | documents → token shards → batches | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/vorhersager/gw1b-f2026/blob/main/notebooks/02_data_pipeline.ipynb) |
+| `03_train_proxy_model` | train a small model end-to-end, read `metrics.jsonl`, resume | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/vorhersager/gw1b-f2026/blob/main/notebooks/03_train_proxy_model.ipynb) |
+| `04_evaluate_and_export` | perplexity, lm-eval benchmarks, export to Hugging Face format | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/vorhersager/gw1b-f2026/blob/main/notebooks/04_evaluate_and_export.ipynb) |
+
+
 ## What is different from a normal Colab
 
 | | Google-hosted Colab runtime | Colab connected to Pegasus |

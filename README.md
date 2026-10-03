@@ -65,7 +65,8 @@ One command from the laptop that does both steps and opens the browser:
 `laptop/gw1b-connect.sh <netid>` (macOS/Linux) or `laptop\gw1b-connect.ps1 <netid>` (Windows).
 
 Start with `~/gw1b/notebooks/00_hello_pegasus.ipynb` → `01_tokenizer` → `02_data_pipeline` →
-`03_train_proxy_model` → `04_evaluate_and_export`.
+`03_train_proxy_model` → `04_evaluate_and_export`. Each notebook has an **Open in Colab** badge at the top;
+the one-click list is in [docs/COLAB.md](docs/COLAB.md) (open in Colab, then *Connect to a local runtime*).
 
 ### 3. Anything longer than an hour: a batch job
 ```bash

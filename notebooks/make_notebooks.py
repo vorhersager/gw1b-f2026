@@ -5,12 +5,18 @@ import nbformat as nbf
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+GITHUB_REPO = "vorhersager/gw1b-f2026"   # the "Open in Colab" badge opens notebooks/<name>.ipynb from this repo
+GITHUB_BRANCH = "main"
 
 SETUP = '''# --- GW1B setup cell (same in every notebook) -------------------------------------------------
 import os, sys, json, time, pathlib
-GW1B_HOME    = os.environ.get("GW1B_HOME", "/SEAS/groups/gw1b/gw1b-f2026")
+GW1B_HOME    = os.environ.get("GW1B_HOME", "/scratch/gw1b-class/group/gw1b-f2026")
 GW1B_SCRATCH = os.environ.get("GW1B_SCRATCH", "/scratch/gw1b-class")
-GW1B_GROUP   = os.environ.get("GW1B_GROUP", "/SEAS/groups/gw1b")
+GW1B_GROUP   = os.environ.get("GW1B_GROUP", "/scratch/gw1b-class/group")
+if not os.path.isdir(GW1B_HOME):
+    raise RuntimeError(f"This kernel is not running on Pegasus ({GW1B_HOME} does not exist). In Colab use "
+                       "Connect \u25be \u2192 'Connect to a local runtime' and paste the URL printed by `gw1b jupyter` "
+                       "(docs/COLAB.md); a Google-hosted runtime does not have the class environment.")
 USER_DIR     = os.path.join(GW1B_SCRATCH, "users", os.environ.get("USER", "student"))
 os.makedirs(USER_DIR, exist_ok=True)
 if GW1B_HOME not in sys.path:
@@ -21,12 +27,25 @@ print("your scratch dir:", USER_DIR)
 '''
 
 
-def nb(cells, title):
+def colab_badge(name):
+    url = f"https://colab.research.google.com/github/{GITHUB_REPO}/blob/{GITHUB_BRANCH}/notebooks/{name}.ipynb"
+    return f"[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]({url})"
+
+
+def nb(cells, title, name):
     n = nbf.v4.new_notebook()
     n["metadata"] = {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-                     "language_info": {"name": "python"}}
-    n["cells"] = [nbf.v4.new_markdown_cell(f"# {title}")] + [
+                     "language_info": {"name": "python"},
+                     "colab": {"name": name + ".ipynb", "provenance": []}}
+    header = (f"# {title}\n\n{colab_badge(name)}\n\n"
+              "*Colab:* after the notebook opens, **Connect \u25be \u2192 Connect to a local runtime** and paste the URL printed by "
+              "`gw1b jupyter` on Pegasus (one-step from the laptop: `laptop/gw1b-connect.sh <netid>`; details in "
+              "[docs/COLAB.md](https://github.com/" + GITHUB_REPO + "/blob/" + GITHUB_BRANCH + "/docs/COLAB.md)). "
+              "The code then runs on a Pegasus GPU node. *JupyterLab / Open OnDemand:* just run the cells.")
+    n["cells"] = [nbf.v4.new_markdown_cell(header)] + [
         nbf.v4.new_markdown_cell(c[1]) if c[0] == "md" else nbf.v4.new_code_cell(c[1]) for c in cells]
+    for i, c in enumerate(n["cells"]):   # stable cell ids -> regenerating the notebooks gives clean diffs
+        c["id"] = f"{name[:2]}-{i:02d}"
     return n
 
 
@@ -51,7 +70,7 @@ print(f"matmul throughput: {2 * 4096**3 / dt / 1e12:.1f} TFLOP/s  (A100 bf16 pea
 
 | what | where | notes |
 |---|---|---|
-| shared environment, code, tokenizer | `$GW1B_GROUP` (`/SEAS/groups/gw1b`) | persistent, read-only for students |
+| shared environment, code, tokenizer | `$GW1B_GROUP` (currently `/scratch/gw1b-class/group`) | persistent, read-only for students |
 | datasets, HF cache, checkpoints | `$GW1B_SCRATCH` (`/scratch/gw1b-class`) | fast GPFS, **not backed up** — copy results out |
 | your experiments | `$GW1B_SCRATCH/users/<netid>/runs/<run name>` | `config.yaml`, `metrics.jsonl`, `checkpoints/`, `summary.json` |
 | your home | `~` (25 GB quota) | notebooks, small files only |"""),
@@ -83,7 +102,7 @@ laptop (browser / Colab UI) ──ssh tunnel──▶ Pegasus login node ──S
   and resumes automatically from its last checkpoint if it hits the time limit (`--chain N`).
 
 Next: `01_tokenizer.ipynb`."""),
-], "00 · Hello Pegasus: is everything working?")
+], "00 · Hello Pegasus: is everything working?", "00_hello_pegasus")
 
 # ---------------------------------------------------------------------------------------------
 nb01 = nb([
@@ -142,7 +161,7 @@ for kind, tok in toks.items():
 * `byte_fallback=True` means no `<unk>`: every byte is representable. Try `tok.pieces("日本語 ∑ 🎓")`.
 
 Next: `02_data_pipeline.ipynb`."""),
-], "01 · Tokenizers: BPE vs unigram")
+], "01 · Tokenizers: BPE vs unigram", "01_tokenizer")
 
 # ---------------------------------------------------------------------------------------------
 nb02 = nb([
@@ -192,7 +211,7 @@ print("4 ranks concatenate to the global batch:", bool((np.concatenate(parts) ==
 * The `manifest.json` next to the shards records the tokenizer hash and source files = the *data manifest* we release.
 
 Next: `03_train_proxy_model.ipynb`."""),
-], "02 · Data pipeline: documents → token shards → batches")
+], "02 · Data pipeline: documents → token shards → batches", "02_data_pipeline")
 
 # ---------------------------------------------------------------------------------------------
 nb03 = nb([
@@ -253,7 +272,7 @@ cfg_d = load_config(..., ["optim.schedule=wsd", "optim.lr=2e-3", "run.name=nb03-
 As a batch job the same thing is  `gw1b train --config configs/50m.yaml --set model.n_kv_heads=8 --set run.name=mha`.
 
 Next: `04_evaluate_and_export.ipynb`."""),
-], "03 · Train a proxy model end-to-end")
+], "03 · Train a proxy model end-to-end", "03_train_proxy_model")
 
 # ---------------------------------------------------------------------------------------------
 nb04 = nb([
@@ -300,7 +319,7 @@ python -m gw1b.export_hf --run $GW1B_SCRATCH/checkpoints/gw1b-base --out $GW1B_G
 huggingface-cli upload gwu-gw1b/GW-1B-Base $GW1B_GROUP/release/GW-1B-Base      # from a login node
 ```
 plus the tokenizer, the data manifest (`manifest.json`), configs, `metrics.jsonl` and the model card."""),
-], "04 · Evaluate, benchmark and export")
+], "04 · Evaluate, benchmark and export", "04_evaluate_and_export")
 
 for name, n in [("00_hello_pegasus", nb00), ("01_tokenizer", nb01), ("02_data_pipeline", nb02),
                 ("03_train_proxy_model", nb03), ("04_evaluate_and_export", nb04)]:
