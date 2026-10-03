@@ -41,18 +41,18 @@ bash gw1b-f2026/bin/gw1b-admin all                # asks: group dir, scratch dir
 
 | step | what it does | needs you for |
 |---|---|---|
-| `init` | writes paths + class group into `gw1b.env`; copies the repo to `$GW1B_GROUP/gw1b-f2026` (students must read it from there); creates the directory layout on group storage and scratch; sets group permissions; fixes executable bits / CRLF if the checkout came from Windows | confirming four paths |
-| `discover` | `sinfo`/`sacctmgr`/`sbatch --test-only` → confirms the `gpu`/`cpu` partitions, reads the GPU **GRES type names** (v100/a100/l40s/rtx6000) and the `gpu` wall-time limit, whether `--account` is required, apptainer (module), login-node internet; a 3-minute `srun` on one V100 reads the **driver version** (must be ≥ 525) and checks compute-node internet; writes everything into `gw1b.env` and `docs/CLUSTER_FACTS.generated.md` | nothing |
+| `init` | writes paths + class group into `gw1b.local.env` (git-ignored; `gw1b.env` keeps the defaults, so `git pull` never conflicts); copies the repo to `$GW1B_GROUP/gw1b-f2026` (students must read it from there); creates the directory layout on group storage and scratch; sets group permissions; fixes executable bits / CRLF if the checkout came from Windows | confirming four paths |
+| `discover` | `sinfo`/`sacctmgr`/`sbatch --test-only` → confirms the `gpu`/`cpu` partitions, reads the GPU **GRES type names** (v100/a100/l40s/rtx6000) and the `gpu` wall-time limit, whether `--account` is required, apptainer (module), login-node internet; a 3-minute `srun` on one V100 reads the **driver version** (must be ≥ 525) and checks compute-node internet; writes everything into `gw1b.local.env` and `docs/CLUSTER_FACTS.generated.md` | nothing |
 | `build` | pulls the GitHub-built image into `$GW1B_GROUP/sif/gw1b-2026.09.sif` (`apptainer build … docker://`, no privileges needed); builds from `env/gw1b.def` where fakeroot exists; or the shared venv when there is no apptainer | 10–20 min wait |
 | `test` | import check, the CPU test suite inside the environment, then `gw1b doctor --gpu` (a real GPU job: JAX sees the GPU, matmul TFLOP/s in the dtype that GPU supports, a 60-step training run with `model.dtype: auto`) | waiting for a GPU |
 | `data` | submits a chain of `cpu` jobs: download FineWeb-Edu `sample-10BT` (~28 GB) into `$HF_HOME` on scratch → 2 GB tokenizer corpus → tokenizer training (32 cores) → tokenization (40 cores) → `$GW1B_SCRATCH/data/fineweb-edu-10B/{train,val}` + `manifest.json` (on the login node instead if `GW1B_COMPUTE_INTERNET=no`) | nothing; jobs run for 3–4 h |
-| `students` | bakes your paths into `laptop/gw1b-connect.sh|.ps1` and writes `ONBOARDING.md` — the text you send to the class | copy-paste |
+| `students` | writes `onboarding/ONBOARDING.md` (the text you send to the class) and copies of `gw1b-connect.sh|.ps1` with your paths baked in, next to it (`onboarding/` is git-ignored; `laptop/` in the repo already carries the Pegasus defaults) | copy-paste |
 
 Options: `--yes` (no prompts), `--sample 100BT` (the 100B-token corpus later in the semester),
 `--vocab 32000 --type bpe|unigram`, `--skip-download` (parquet files already on scratch, e.g. via Globus),
 `--force` (redo a step whose output exists), `--no-gpu-test`.
 
-When `discover` cannot determine something it says so, and `gw1b.env` is a plain shell file you can edit
+When `discover` cannot determine something it says so, and `gw1b.local.env` is a plain shell file you can edit
 (`VERIFY` marks the lines in question). `gw1b doctor` — the students' check — flags what is still missing.
 
 ## If the image cannot be pulled from GHCR
@@ -109,7 +109,7 @@ mkdir -p $GW1B_GROUP/{sif,tokenizer,release} $GW1B_SCRATCH/{data,hf_cache,users,
 chgrp -R MG-gw1b-class $GW1B_GROUP $GW1B_SCRATCH; chmod -R g+rX,o-rwx $GW1B_GROUP; chmod g+s $GW1B_GROUP/gw1b-f2026
 chmod 2775 $GW1B_SCRATCH/{users,teams,checkpoints,tmp}; chmod 2755 $GW1B_SCRATCH/{data,hf_cache}
 # discover
-bash slurm/discover_cluster.sh > docs/CLUSTER_FACTS.generated.md     # then edit the VERIFY lines of gw1b.env
+bash slurm/discover_cluster.sh > docs/CLUSTER_FACTS.generated.md     # then put the VERIFY values into gw1b.local.env
 # build
 env/build_sif.sh --from-image ghcr.io/vorhersager/gw1b-f2026:2026.09    # or env/build_venv.sh
 # test

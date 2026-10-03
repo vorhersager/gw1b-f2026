@@ -14,8 +14,18 @@ Password login does not exist.
 ("HPC Pegasus 2FA") and set up the authenticator immediately; afterwards every new ssh connection asks for the
 6-digit code. The laptop script opens one connection and reuses it for the tunnel, so you type it once.
 
-**`sbatch: error: invalid partition` / `Invalid generic resource` / `Invalid account`** — the `VERIFY` lines in `gw1b.env` (`GW1B_PART_*`, `GW1B_GPU_*`,
-`GW1B_ACCOUNT`, `GW1B_GRES`). Run `bash slurm/discover_cluster.sh`.
+**`git pull` says `Your local changes to the following files would be overwritten by merge: gw1b.env`** — an older
+`gw1b-admin init`/`discover` edited `gw1b.env` in place. Move those values to the git-ignored `gw1b.local.env` (which
+`gw1b.env` now sources first), restore the tracked file, and pull:
+```bash
+git diff -U0 gw1b.env | grep '^+export' | sed 's/^+//' > gw1b.local.env   # keep what init/discover wrote
+git checkout -- gw1b.env && git pull && cat gw1b.local.env
+```
+From now on init/discover write `gw1b.local.env` only (and `gw1b-admin` does this migration itself when it finds an
+edited `gw1b.env`), so pulls stay clean. `gw1b-admin students` likewise writes to `onboarding/` instead of `laptop/`.
+
+**`sbatch: error: invalid partition` / `Invalid generic resource` / `Invalid account`** — the `VERIFY` values (`GW1B_PART_*`, `GW1B_GPU_*`,
+`GW1B_ACCOUNT`, `GW1B_GRES`) are wrong for this cluster. Run `gw1b-admin discover` (writes `gw1b.local.env`) or set them there by hand.
 
 **JAX sees no GPU (`jax.devices()` → CpuDevice) inside a GPU job**
 1. `nvidia-smi` in the job output shows the driver: it must be **≥ 525** for the CUDA 12 wheels. If it is older, ask HPC
