@@ -21,7 +21,7 @@ the machine-readable parts and writes them into `gw1b.env`.
 | Unix group | `gw1b-class` — creating it and the directory layout is "not an issue" |
 | compute-node internet | yes, compute nodes download freely (so data jobs run on `cpu` nodes, W&B can be online) |
 | inter-node network | "completely open" between compute nodes; interconnect type/interface names not yet answered |
-| Jupyter | a Jupyter (classic) app exists on Pegasus (Open OnDemand-style), works on all x86 nodes, kernels selectable → `gw1b kernel`; SSH port forwarding "generally works" → `gw1b jupyter` + tunnel (needed for Colab) |
+| Jupyter | a Jupyter (classic) app exists on Pegasus (Open OnDemand-style), works on all x86 nodes; **it loads kernels from `~/.local/share/jupyter/kernels` (confirmed 10/1)**, which is exactly where `gw1b kernel` installs the GW1B kernel; SSH port forwarding "generally works" → `gw1b jupyter` + tunnel (needed for Colab) |
 | reservations | only single-day (demo-style) reservations normally; multi-day A100 reservations need a written proposal; partial-node reservations are being worked on; advice: submit flexible jobs (8, 4, 2 GPUs) rather than wait for a whole node |
 | Globus | yes (Pegasus storage ↔ GW Box ↔ GW Google Drive; Globus Personal Connect for laptops) |
 
@@ -31,7 +31,7 @@ the machine-readable parts and writes them into `gw1b.env`.
 * Whether `--account`/`--qos` are required (HPC's example had neither) and per-user GPU/job limits on `gpu`.
 * Exact GRES type names for V100, L40S and the Blackwell nodes (`sinfo -o "%N %G"` once we have an account).
 * Interconnect between GPU nodes (InfiniBand vs Ethernet; interface names for `NCCL_SOCKET_IFNAME`).
-* Student accounts before the Friday 10/2 lab; the Jupyter-app walkthrough meeting.
+* Student accounts; the Jupyter-app walkthrough meeting; HPC's second reply of 10/1 ("More answers below", items 4+) still to be folded in here.
 
 ## What the hardware means for the project
 

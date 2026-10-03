@@ -43,6 +43,17 @@ Useful:
 * `%load_ext tensorboard` / `%tensorboard --logdir <run>/tb` inside a notebook (port 6006 is tunnelled).
 * A JupyterLab *Terminal* runs inside the environment on the GPU node — handy for `nvidia-smi`, quick scripts.
 
+
+### Two ways to get a notebook on a GPU node
+
+| | `gw1b jupyter` + ssh tunnel | Pegasus Jupyter app (web portal) |
+|---|---|---|
+| start | `gw1b jupyter` on the login node, then the printed `ssh -N -L …` on your laptop | portal → Jupyter app → pick GPU/time → launch |
+| notebook UI | JupyterLab in your browser **or Google Colab** (*Connect to a local runtime*) | classic Jupyter in the portal |
+| the GW1B environment | automatic | run `gw1b kernel` once; then select the **GW1B (JAX)** kernel — the app reads `~/.local/share/jupyter/kernels` |
+| good for | Colab users, TensorBoard (port 6006 is in the tunnel) | no ssh, no tunnel |
+
+
 ## 3. Longer work: batch jobs
 
 Anything longer than an hour runs as a Slurm job so it does not depend on your laptop or your Jupyter time limit.

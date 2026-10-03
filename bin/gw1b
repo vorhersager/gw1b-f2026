@@ -11,7 +11,7 @@
 #   gw1b status                     your jobs + idle GPUs by type
 #   gw1b cancel <jobid|all>         cancel jobs
 #   gw1b doctor [--gpu]             check the setup (add --gpu to run a 3-minute GPU smoke test job)
-#   gw1b kernel                     install a "GW1B" Jupyter kernel for Open OnDemand / VS Code
+#   gw1b kernel                     install a "GW1B" Jupyter kernel for the Pegasus Jupyter app / VS Code
 #
 # Job options (all optional): --gpus N  --gpu-type v100|a100|l40s|any  --nodes K  --partition NAME  --time D-HH:MM:SS
 #                             --cpus N  --mem 48G  --name NAME  --chain K (resubmit K times for long runs)  --after JOBID  --cpu
@@ -284,7 +284,7 @@ cmd_kernel() {
   "env": {"GW1B_HOME": "$GW1B_HOME"}
 }
 EOF
-    info "installed Jupyter kernel 'GW1B (JAX)' at $dir — select it in Open OnDemand JupyterLab or VS Code"
+    info "installed Jupyter kernel 'GW1B (JAX)' at $dir — select it in the Pegasus Jupyter app (it reads this folder) or VS Code"
 }
 
 # ------------------------------------------------------------------ dispatch
