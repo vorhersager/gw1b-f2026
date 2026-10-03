@@ -67,7 +67,7 @@ docker build -t gw1b -f env/Dockerfile env
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/output --privileged \
     quay.io/singularity/docker2singularity:v4.1.0 --name gw1b-2026.09.sif gw1b
 # copy with scp or Globus, then:
-ssh pegasus 'ln -sfn gw1b-2026.09.sif /SEAS/groups/gw1b/sif/gw1b.sif'
+ssh pegasus 'ln -sfn gw1b-2026.09.sif /scratch/gw1b-class/group/sif/gw1b.sif'
 ```
 HPC staff also offered to build containers on request (send them `env/gw1b.def`). Last resort: the shared venv
 (`gw1b-admin build venv`): same lock file, same versions, no container.
@@ -104,7 +104,7 @@ HPC staff also offered to build containers on request (send them `env/gw1b.def`)
 
 ```bash
 # init
-export GW1B_GROUP=/SEAS/groups/gw1b GW1B_SCRATCH=/scratch/gw1b-class
+export GW1B_GROUP=/scratch/gw1b-class/group GW1B_SCRATCH=/scratch/gw1b-class   # (the Research NAS path once HPC sends it)
 mkdir -p $GW1B_GROUP/{sif,tokenizer,release} $GW1B_SCRATCH/{data,hf_cache,users,teams,checkpoints,tmp}
 chgrp -R MG-gw1b-class $GW1B_GROUP $GW1B_SCRATCH; chmod -R g+rX,o-rwx $GW1B_GROUP; chmod g+s $GW1B_GROUP/gw1b-f2026
 chmod 2775 $GW1B_SCRATCH/{users,teams,checkpoints,tmp}; chmod 2755 $GW1B_SCRATCH/{data,hf_cache}

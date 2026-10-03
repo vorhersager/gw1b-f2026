@@ -40,7 +40,7 @@ There is nothing to install. The environment lives on the cluster; you connect t
 ### 1. One-time setup (5 minutes)
 ```bash
 ssh <netid>@pegasus.arc.gwu.edu
-source /SEAS/groups/gw1b/gw1b-f2026/activate.sh     # exact path: see the onboarding message from your instructor
+source /scratch/gw1b-class/group/gw1b-f2026/activate.sh     # fall 2026 path (see the onboarding message if it moved)
 gw1b setup           # adds the environment to ~/.bashrc, creates your folders, copies starter notebooks to ~/gw1b
 gw1b doctor          # every line should say [ok]
 ```

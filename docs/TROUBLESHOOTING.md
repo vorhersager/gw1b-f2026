@@ -1,6 +1,6 @@
 # Troubleshooting
 
-**`gw1b: command not found`** — `source /SEAS/groups/gw1b/gw1b-f2026/activate.sh` (or `gw1b setup` once, then open a new shell).
+**`gw1b: command not found`** — `source /scratch/gw1b-class/group/gw1b-f2026/activate.sh` (or `gw1b setup` once, then open a new shell).
 
 **`gw1b-exec: no environment found`** — neither the container (`$GW1B_SIF`) nor the venv (`$GW1B_VENV`) exists or
 `apptainer` is not available. Instructor: `env/build_sif.sh` or `env/build_venv.sh`; if apptainer is a module, set

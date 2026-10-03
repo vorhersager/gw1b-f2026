@@ -16,7 +16,7 @@ the GW VPN first. Every new ssh connection asks for your 2FA code.
 
 ```bash
 ssh <netid>@pegasus.arc.gwu.edu
-source /SEAS/groups/gw1b/gw1b-f2026/activate.sh      # the path your instructor gave you
+source /scratch/gw1b-class/group/gw1b-f2026/activate.sh      # fall 2026 path (the onboarding message has the current one)
 gw1b setup           # once: adds the line above to ~/.bashrc, creates your scratch folders, copies the notebooks to ~/gw1b
 gw1b doctor          # every line [ok]?
 gw1b kernel          # once: makes the environment selectable in the Open OnDemand Jupyter app
