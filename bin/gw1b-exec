@@ -38,6 +38,8 @@ if [[ "$runtime" == "auto" ]]; then
     else
         echo "gw1b-exec: no environment found. Expected container $sif (needs apptainer/singularity)" >&2
         echo "           or venv $GW1B_VENV. Instructor: run env/build_sif.sh or env/build_venv.sh." >&2
+        echo "           (GW1B_GROUP=$GW1B_GROUP, config $GW1B_HOME/gw1b.env + gw1b.local.env; if the image exists under another" >&2
+        echo "            group directory, the site values are missing or stale — gw1b-admin init / open a new shell)" >&2
         exit 1
     fi
 fi
