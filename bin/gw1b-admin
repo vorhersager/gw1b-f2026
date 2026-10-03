@@ -415,7 +415,7 @@ One command from the laptop instead: \`laptop/gw1b-connect.sh <netid>\` (macOS/L
 gw1b train --gpus 1 --time 12:00:00 --config configs/50m.yaml --set run.name=team2-baseline
 gw1b status  |  gw1b cancel <jobid>  |  gw1b budget --config configs/50m.yaml --tokens 1e9 --gpu a100 --n-gpus 1
 \`\`\`
-Full guide: $GW1B_HOME/docs/STUDENT_GUIDE.md · Colab: docs/COLAB.md · problems: docs/TROUBLESHOOTING.md
+Full guide: $GW1B_HOME/docs/STUDENT_GUIDE.md · GPUs and tools explained: docs/PRIMER.md · Colab: docs/COLAB.md · problems: docs/TROUBLESHOOTING.md
 EOF
     ok "wrote $THIS_HOME/ONBOARDING.md"
     printf '\n%s\n' "$(sed -n '1,14p' "$THIS_HOME/ONBOARDING.md")"

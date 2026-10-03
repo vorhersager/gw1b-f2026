@@ -21,6 +21,7 @@ laptop (browser / Colab UI) ──ssh tunnel──▶ Pegasus login node ──S
 
 | I am a… | start here |
 |---|---|
+| **new to GPUs / clusters** | `docs/PRIMER.md` — the GPUs on Pegasus and what every tool in this box is for |
 | **student** | [Install & use on Pegasus](#students-install--use-on-pegasus) → `docs/STUDENT_GUIDE.md`, `docs/COLAB.md`, notebooks `00`–`04` |
 | **instructor / TA** | [Install on Pegasus](#instructors-install-the-environment-on-pegasus) → `docs/INSTRUCTOR_SETUP.md` |
 | **team lead** | `docs/TEAM_PLAYBOOK.md` — where Teams 1–5 plug into the toolchain |
@@ -93,7 +94,7 @@ gw1b train [job opts] --config C [--set k=v]     gw1b run [job opts] <python arg
 gw1b status        gw1b cancel <id|all>          gw1b doctor [--gpu]      gw1b budget …      gw1b kernel
 python -m gw1b.evaluate --run R      python -m gw1b.generate --run R --prompt "…"      python -m gw1b.export_hf --run R --out D --verify
 ```
-Full guide: [`docs/STUDENT_GUIDE.md`](docs/STUDENT_GUIDE.md) · Colab: [`docs/COLAB.md`](docs/COLAB.md) ·
+Full guide: [`docs/STUDENT_GUIDE.md`](docs/STUDENT_GUIDE.md) · what the GPUs and tools are: [`docs/PRIMER.md`](docs/PRIMER.md) · Colab: [`docs/COLAB.md`](docs/COLAB.md) ·
 problems: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ---
@@ -180,7 +181,7 @@ gw1b/               the Python package
 configs/            tiny_debug, 50m, 100m, 200m, 350m, gw1b_1p15b
 notebooks/          00 hello → 01 tokenizer → 02 data → 03 train → 04 evaluate/export (+ make_notebooks.py)
 tests/              CPU smoke tests (model, KV cache, sharded training, loader, checkpoint/resume, generation, export)
-docs/               STUDENT_GUIDE · COLAB · INSTRUCTOR_SETUP · TEAM_PLAYBOOK · CLUSTER_FACTS · ARCHITECTURE · TROUBLESHOOTING
+docs/               PRIMER · STUDENT_GUIDE · COLAB · INSTRUCTOR_SETUP · TEAM_PLAYBOOK · CLUSTER_FACTS · ARCHITECTURE · TROUBLESHOOTING
 ```
 
 ## Developing on a laptop (no GPU needed)
