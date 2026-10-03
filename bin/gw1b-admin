@@ -305,8 +305,19 @@ cmd_test() {
     if "$THIS_HOME/bin/gw1b-exec" python -c "import jax, flax, optax, orbax.checkpoint, sentencepiece, datasets, lm_eval, gw1b" 2>"$TMP/imp.err"; then
         ok "environment imports: $("$THIS_HOME/bin/gw1b-exec" python -c 'import jax, flax; print("jax", jax.__version__, "flax", flax.__version__)')"
     else fail "imports failed: $(tail -1 "$TMP/imp.err")"; return 1; fi
+    # pytest is a dev tool, not part of the pinned runtime; older images lack it -> install it beside the environment
+    local tools="$GW1B_GROUP/tools/pytest"
+    if ! "$THIS_HOME/bin/gw1b-exec" python -c "import pytest" 2>/dev/null; then
+        if [[ ! -d "$tools/pytest" ]]; then
+            info "the image has no pytest; installing it once into $tools (login-node internet)"
+            "$THIS_HOME/bin/gw1b-exec" python -m pip install --quiet --disable-pip-version-check --target "$tools" pytest 2>&1 | tail -2 || true
+            chgrp -R "$GW1B_UNIX_GROUP" "$tools" 2>/dev/null; chmod -R g+rX "$tools" 2>/dev/null
+        fi
+        export PYTHONPATH="$tools${PYTHONPATH:+:$PYTHONPATH}"
+        "$THIS_HOME/bin/gw1b-exec" python -c "import pytest" 2>/dev/null || { fail "could not install pytest (no internet on this node?) — run 'gw1b-admin test' from a node with internet, or add pytest to env/requirements.in and rebuild"; return 1; }
+    fi
     info "running the CPU test suite inside the environment (~1-2 min)..."
-    if (cd "$THIS_HOME" && nice -n 10 "$THIS_HOME/bin/gw1b-exec" python -m pytest tests -q -x 2>&1 | tail -3); then ok "tests passed"; else fail "tests failed"; return 1; fi
+    if (cd "$THIS_HOME" && nice -n 10 "$THIS_HOME/bin/gw1b-exec" python -m pytest tests -q -x -p no:cacheprovider 2>&1 | tail -3); then ok "tests passed"; else fail "tests failed"; return 1; fi
     if [[ "$GPU_TEST" == 1 ]]; then
         have_slurm || { warn "no Slurm here; skipping the GPU smoke test"; return 0; }
         "$THIS_HOME/bin/gw1b" doctor --gpu || return 1

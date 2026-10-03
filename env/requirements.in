@@ -29,3 +29,4 @@ scikit-learn
 tqdm
 rich
 protobuf
+pytest==9.1.1          # test suite inside the image (gw1b-admin test)
