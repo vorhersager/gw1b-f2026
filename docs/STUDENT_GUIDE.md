@@ -77,7 +77,7 @@ gw1b cancel <jobid>
 * **Time limits**: if the job hits its limit, just resubmit the same command — it resumes from the last checkpoint.
   For runs longer than a limit submit a chain: `--chain 4` queues four dependent jobs.
 * **Which GPUs**: Pegasus has one `gpu` partition; the model is chosen with `--gpu-type v100|a100|l40s` (default
-  V100; `--gpus 5–8` implies A100). V100s have no bf16 → add `--set model.dtype=float32`. `gw1b status` shows how
+  V100; `--gpus 5–8` implies A100). V100s have no bf16: `model.dtype: auto` trains in float32 there. `gw1b status` shows how
   many nodes of each type are idle right now. There are no per-user limits and no QOS: priority is fair-share, so
   ask for what you need and no more — 1–2-GPU jobs start fastest, and nothing is ever preempted once it runs.
 * **Wall time**: the `gpu` partition allows 7 days, but short jobs start sooner; for anything over a day use

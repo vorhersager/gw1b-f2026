@@ -41,8 +41,10 @@ release ──export_hf──▶ $GW1B_GROUP/release/GW-1B-Base/{model.safetenso
 
 ## Numerics
 
-* Master weights f32, matmuls in bf16 (`model.dtype`), logits and loss in f32, AdamW moments f32.
-* Attention: cuDNN flash attention on Ampere+ (`attn_implementation=auto`), XLA elsewhere; identical math.
+* Master weights f32, matmuls in bf16 (`model.dtype: auto` = bf16 on GPUs that have it, f32 on V100/CPU), logits
+  and loss in f32, AdamW moments f32.
+* Attention: cuDNN flash attention on Ampere+ (`attn_implementation=auto`), XLA elsewhere; identical math. On a
+  V100 the XLA path computes the scores in f32 (XLA:GPU has no bf16 dot algorithm before Ampere).
 * RoPE uses the Hugging Face "rotate-half" layout, so exported weights need no permutation; `export_hf.verify`
   checks log-prob agreement with `transformers` on CPU (the tests show a max difference of 0.0000 in f32).
 * Weight decay is applied to matrices only (norm scales / biases excluded), init N(0, 0.02) with 1/√(2L) scaling

@@ -19,7 +19,7 @@ the machine-readable parts and writes them into `gw1b.env`.
 | Apptainer | `module load apptainer` (1.3.0, newer version coming); **no subuid/subgid → no `--fakeroot` builds**; `--nv` works; bring images as SIF, or ask HPC to build |
 | scratch | **Lustre is retired.** Scratch is GPFS at `/scratch/<group>` (e.g. `/scratch/gw1b-class`), 2 PB shared (79 % used on 9/30). Purges are age-based, ad hoc when usage grows, always announced in advance, exceptions reviewed — our files are "unlikely to be impacted" |
 | group storage | `/SEAS/groups/gw1b` is the default; HPC may set the class up in the new **Research NAS** layout instead (path to follow). Quotas are per school (SEAS, shared), not per group; our ~1 TB "should not be problematic". Home quotas are per user |
-| Unix group | `gw1b-class` — creating it and the directory layout is "not an issue" |
+| Unix group | **`MG-gw1b-class`** (what `groups` prints on Pegasus; HPC called it `gw1b-class` in email) — owns `/scratch/gw1b-class` (`root:MG-gw1b-class`, mode 2770, created 10/1) |
 | compute-node internet | yes, compute nodes download freely (so data jobs run on `cpu` nodes, W&B can be online) |
 | inter-node network | V100/A100 nodes: **100 Gb/s EDR InfiniBand** (HCA `mlx5_0`, IPoIB `ib0`) + 10 GbE (`eno0`); traffic between compute nodes open; **GPUDirect RDMA not loaded by default**, no GPUDirect Storage; the Blackwell nodes get 25 GbE + a separate 400 Gb/s NDR fabric — mixed old/new jobs fall back to Ethernet |
 | Jupyter | Open OnDemand at **https://ood.arc.gwu.edu** → *Jupyter Notebook Pegasus* app (classic Jupyter; review every field before Launch — "the branching logic is a little odd"); works on all x86 nodes; **loads kernels from `~/.local/share/jupyter/kernels`** (10/1) = where `gw1b kernel` installs ours; SSH port forwarding "generally works" → `gw1b jupyter` + tunnel (needed for Colab) |
@@ -32,15 +32,18 @@ the machine-readable parts and writes them into `gw1b.env`.
 
 ## Still open
 
-* The Research NAS group path (HPC will send it) — then set `GW1B_GROUP` in `gw1b.env`.
-* Exact GRES type names for V100, L40S, GH200 and the Blackwell nodes (`sinfo -o "%N %G"`; `gw1b-admin discover` reads them); the Blackwell nodes' arrival date.
+* The Research NAS group path (HPC will send it) — then set `GW1B_GROUP` in `gw1b.env` and move `sif/`, `tokenizer/` and the
+  repository there. Until then the class uses `/scratch/gw1b-class/group` as the "persistent" directory (`/SEAS/groups/gw1b`
+  does not exist yet and cannot be created by us).
+* GRES type names: `v100` is confirmed (`gw1b doctor`, 10/2: the smoke test ran on `gpu023`, a Tesla V100-SXM2-16GB with driver
+  575.57.08, compute capability 7.0). Still to read off `sinfo -o "%N %G"`: L40S, GH200 and the Blackwell nodes (and their arrival date).
 * HPC's decision on Friday-lab reservations, and whether a written proposal for a partial A100 reservation is worth sending.
 * Student accounts: everyone must submit the access request form with an SSH key; HPC's onboarding session before the first Pegasus lab.
 
 ## What the hardware means for the project
 
 **V100 (16 GB)** — the default for students (`--gpu-type v100`, or nothing): plenty for the 50M–350M proxy ladder,
-but no bf16 tensor cores (use `model.dtype=float32`; ~15 TFLOP/s), 16 GB per GPU (FSDP is on by default), and no
+but no bf16 tensor cores (`model.dtype: auto` picks float32 there; ~15 TFLOP/s), 16 GB per GPU (FSDP is on by default), and no
 cuDNN flash attention (XLA attention is used automatically). Ask for 4 to get a NVLink node (`--gpus 4`).
 
 **A100 80 GB PCIe (2 nodes × 8, `--gpu-type a100`)** — everything above 200M and GW-1B itself: bf16 (312 TFLOP/s),

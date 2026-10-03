@@ -14,7 +14,7 @@ model:
   pos: rope
   rope_theta: 10000.0
   tie_embeddings: true
-  dtype: bfloat16
+  dtype: auto          # bf16 on the A100/GH200 nodes this run is meant for; float32 if someone test-runs it on a V100
 data:
   seq_len: 2048
 optim:

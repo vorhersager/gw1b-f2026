@@ -6,7 +6,7 @@ Design (from the GW1B design document):
     * grouped-query attention (n_kv_heads < n_heads), multi-head when n_kv_heads == n_heads
     * SwiGLU (or GELU / ReLU) feed-forward
     * tied input/output embeddings (optional)
-    * bf16 compute with f32 master weights
+    * bf16 compute with f32 master weights (`dtype: auto` = bf16 where the GPU has it, f32 on V100 / CPU)
 
 Conventions follow Hugging Face's `LlamaForCausalLM` (RoPE "rotate_half", separate gate/up/down
 projections) so a trained checkpoint exports to HF format without any weight permutation
@@ -17,6 +17,8 @@ directly sharded across GPUs (FSDP) — see gw1b/sharding.py.
 """
 from __future__ import annotations
 
+import dataclasses
+import functools
 import math
 from typing import Any
 
@@ -30,6 +32,60 @@ from .config import ModelConfig
 
 DTYPES = {"bfloat16": jnp.bfloat16, "float16": jnp.float16, "float32": jnp.float32}
 MESH_AXIS = "data"  # the single mesh axis used for data parallelism + parameter sharding (FSDP)
+
+
+# ---------------------------------------------------------------------------
+# which compute dtype does this machine support?
+# ---------------------------------------------------------------------------
+def _gpu_compute_capability() -> float | None:
+    """CUDA compute capability of the first local device (7.0 = V100, 7.5 = T4, 8.0 = A100, 9.0 = H100 ...).
+
+    None when the device is not an NVIDIA GPU (CPU, TPU, ROCm) or the attribute is missing.
+    """
+    dev = jax.local_devices()[0]
+    if dev.platform != "gpu":
+        return None
+    try:
+        return float(getattr(dev, "compute_capability", None))
+    except (TypeError, ValueError):
+        return None
+
+
+def device_bf16_support() -> tuple[bool, str]:
+    """(does the first local device have native bf16 matmuls?, one-line reason).
+
+    NVIDIA GPUs before Ampere (compute capability < 8.0: V100 = 7.0, T4 = 7.5) have no bf16 tensor cores. XLA
+    still runs bf16 programs there by upcasting every bf16 matmul to f32, so bf16 is no faster than f32, slightly
+    less accurate, and the explicit BF16_BF16_F32 dot algorithm that `jax.nn.dot_product_attention` asks for
+    does not even compile ("UNIMPLEMENTED: Unsupported algorithm ... ALG_DOT_BF16_BF16_F32").
+    """
+    dev = jax.local_devices()[0]
+    kind = dev.device_kind
+    if dev.platform == "tpu":
+        return True, f"{kind} (TPU)"
+    if dev.platform != "gpu":
+        return False, f"{dev.platform.upper()} (no bf16 hardware; float32 is faster)"
+    cc = _gpu_compute_capability()
+    if cc is None:
+        return True, kind  # ROCm or unknown: assume bf16 works
+    if cc >= 8.0:
+        return True, f"{kind} (compute capability {cc:.1f})"
+    return False, f"{kind} (compute capability {cc:.1f}: no bf16 tensor cores, XLA would emulate bf16 in f32)"
+
+
+def resolve_dtype(cfg: ModelConfig) -> ModelConfig:
+    """Replace `dtype: auto` by bfloat16 where the accelerator has it (Ampere+ GPUs, TPU), float32 elsewhere."""
+    if cfg.dtype != "auto":
+        return cfg
+    ok, _ = device_bf16_support()
+    return dataclasses.replace(cfg, dtype="bfloat16" if ok else "float32")
+
+
+@functools.lru_cache(maxsize=1)
+def xla_bf16_dot_supported() -> bool:
+    """Can XLA on this device compile dots with the explicit BF16_BF16_F32 algorithm? (GPUs: Ampere and newer.)"""
+    cc = _gpu_compute_capability()
+    return cc is None or cc >= 8.0
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +184,20 @@ class Attention(nnx.Module):
         self.v_proj = nnx.Linear(d, K * hd, kernel_init=_normal(cfg.init_std, (d, K * hd), n_shards), **common)
         self.o_proj = nnx.Linear(H * hd, d, kernel_init=_normal(out_std, (H * hd, d), n_shards), **common)
 
+    @staticmethod
+    def attention(q, k, v, *, implementation="xla", **kw):
+        """`jax.nn.dot_product_attention`, computed in float32 on GPUs that cannot run bf16 dots (V100, T4).
+
+        JAX's XLA attention asks for the BF16_BF16_F32 dot algorithm whenever q is bf16; XLA:GPU only has it
+        on Ampere and newer, and the whole jitted program fails to compile on a V100. Those GPUs emulate bf16
+        in f32 anyway, so doing the attention in f32 there costs nothing (the scores are f32 in both cases).
+        """
+        if implementation == "xla" and q.dtype == jnp.bfloat16 and not xla_bf16_dot_supported():
+            f32 = jnp.float32
+            out = jax.nn.dot_product_attention(q.astype(f32), k.astype(f32), v.astype(f32), implementation="xla", **kw)
+            return out.astype(q.dtype)
+        return jax.nn.dot_product_attention(q, k, v, implementation=implementation, **kw)
+
     def __call__(self, x, cos, sin, *, cache=None, pos=None, valid=None, impl="xla"):
         B, T, _ = x.shape
         q = self.q_proj(x).reshape(B, T, self.n_heads, self.head_dim)
@@ -135,7 +205,7 @@ class Attention(nnx.Module):
         v = self.v_proj(x).reshape(B, T, self.n_kv_heads, self.head_dim)
         q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
         if cache is None:
-            out = jax.nn.dot_product_attention(q, k, v, is_causal=True, implementation=impl)
+            out = self.attention(q, k, v, is_causal=True, implementation=impl)
             new_cache = None
         else:
             # incremental decoding: write the new K/V at [pos, pos+T) and attend to everything <= own position
@@ -147,7 +217,7 @@ class Attention(nnx.Module):
             mask = (k_pos <= q_pos)[None, None, :, :]  # [1, 1, T, S]
             if valid is not None:  # [B, S] False for (left-)padding positions
                 mask = mask & valid[:, None, None, :]
-            out = jax.nn.dot_product_attention(q, k_all, v_all, mask=mask, implementation="xla")
+            out = self.attention(q, k_all, v_all, mask=mask, implementation="xla")
             new_cache = {"k": k_all, "v": v_all}
         return self.o_proj(out.reshape(B, T, self.n_heads * self.head_dim)), new_cache
 
@@ -190,6 +260,7 @@ class GW1BModel(nnx.Module):
     """Decoder-only LM. `model(tokens)` -> logits [B, T, vocab] in float32."""
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs, n_shards: int = 1, attn_impl: str = "xla"):
+        cfg = resolve_dtype(cfg)  # "auto" -> bfloat16 / float32 for this machine; model.cfg.dtype is always concrete
         self.cfg = cfg
         self.attn_impl = attn_impl
         dtype, pdtype = DTYPES[cfg.dtype], DTYPES[cfg.param_dtype]
@@ -255,13 +326,20 @@ class GW1BModel(nnx.Module):
 # utilities
 # ---------------------------------------------------------------------------
 def resolve_attn_impl(cfg: ModelConfig) -> str:
-    """Pick cuDNN flash attention on Ampere+ GPUs with bf16/fp16, XLA otherwise (V100, CPU, f32)."""
+    """Pick cuDNN flash attention on Ampere+ GPUs with bf16/fp16, XLA otherwise (V100, CPU, f32).
+
+    On a V100 with bf16 the XLA path additionally computes attention in f32 (see Attention.attention).
+    """
     if cfg.attn_implementation != "auto":
         return cfg.attn_implementation
-    dev = jax.devices()[0]
+    cfg = resolve_dtype(cfg)
+    dev = jax.local_devices()[0]
     if dev.platform != "gpu" or cfg.dtype == "float32" or cfg.head_dim % 8 or cfg.head_dim > 128:
         return "xla"
-    kind = dev.device_kind.lower()
+    cc = _gpu_compute_capability()
+    if cc is not None:
+        return "cudnn" if cc >= 8.0 else "xla"
+    kind = dev.device_kind.lower()  # no compute capability reported: go by the name
     ampere_or_newer = any(k in kind for k in ("a100", "a10", "a30", "a40", "l40", "l4", "h100", "h200", "gh200",
                                                "b200", "rtx 30", "rtx 40", "rtx 50", "rtx a", "rtx 6000"))
     return "cudnn" if ampere_or_newer else "xla"

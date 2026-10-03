@@ -79,7 +79,8 @@ gw1b cancel <jobid>
 Runs land in `$GW1B_SCRATCH/users/<netid>/runs/<run.name>/` with `config.yaml`, `metrics.jsonl`, `tb/`,
 `checkpoints/` and `summary.json` (loss, tokens, FLOPs, GPU-hours, $ — the numbers every experiment reports).
 A job that hits its time limit **resumes from its last checkpoint** when resubmitted; `--chain 4` queues four
-dependent jobs up front. V100 nodes: add `--set model.dtype=float32` (no bf16 tensor cores).
+dependent jobs up front. `model.dtype: auto` trains in bf16 on A100/L40S/GH200 and in float32 on V100s (no bf16
+tensor cores); override with `--set model.dtype=bfloat16|float32`.
 
 ### 4. Know the cost before you submit
 ```bash

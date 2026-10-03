@@ -210,7 +210,7 @@ cfg = load_config(os.path.join(GW1B_HOME, "configs", "tiny_debug.yaml"), [
     f"data.train_dir={mini}/train", f"data.val_dir={mini}/val", f"data.tokenizer={USER_DIR}/tok-bpe-4k.model",
     "model.vocab_size=4000", "run.name=nb03-tiny", f"run.out_dir={USER_DIR}/runs",
     "run.total_steps=300", "run.log_every=25", "run.eval_every=100", "run.ckpt_every=150",
-    "model.dtype=" + ("bfloat16" if jax.default_backend() == "gpu" else "float32"),
+    "model.dtype=auto",   # bfloat16 on A100/L40S/GH200, float32 on V100 (no bf16 tensor cores) and CPU
 ])
 print(config_summary(cfg))'''),
     ("md", "## 2. Build the model (sharded over all GPUs of the node) and look at it"),
@@ -218,7 +218,7 @@ print(config_summary(cfg))'''),
 from gw1b.model import count_params
 mesh = make_mesh()
 model = create_model(cfg, mesh)
-print(f"{count_params(model)/1e6:.2f}M parameters, attention impl = {model.attn_impl}")
+print(f"{count_params(model)/1e6:.2f}M parameters, dtype = {model.cfg.dtype}, attention impl = {model.attn_impl}")
 print("mesh:", mesh)
 k = model.blocks[0].mlp.up_proj.kernel[...]
 print("one weight matrix:", k.shape, k.dtype, "sharding:", k.sharding.spec)'''),

@@ -11,6 +11,7 @@ wires the processes together in `init_distributed()`.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 
 import jax
@@ -19,7 +20,7 @@ from flax import nnx
 from jax.sharding import AxisType, Mesh, NamedSharding, PartitionSpec as P
 
 from .config import TrainConfig
-from .model import MESH_AXIS, GW1BModel, resolve_attn_impl
+from .model import MESH_AXIS, GW1BModel, device_bf16_support, resolve_attn_impl, resolve_dtype
 
 
 def init_distributed() -> bool:
@@ -41,8 +42,26 @@ def batch_sharding(mesh: Mesh) -> NamedSharding:
     return NamedSharding(mesh, P(MESH_AXIS, None))
 
 
+def resolve_config(cfg: TrainConfig) -> TrainConfig:
+    """Make `model.dtype: auto` concrete for this machine (bf16 on Ampere+ GPUs / TPU, float32 on V100 / CPU).
+
+    `train()` does this before saving config.yaml, so a run directory always records the dtype it was trained with.
+    """
+    return dataclasses.replace(cfg, model=resolve_dtype(cfg.model))
+
+
+def describe_dtype(cfg: TrainConfig) -> str:
+    """One line for the log: which compute dtype is used and why."""
+    resolved = resolve_dtype(cfg.model).dtype
+    if cfg.model.dtype != "auto":
+        return f"model.dtype={resolved} (set in the config)"
+    _, why = device_bf16_support()
+    return f"model.dtype=auto -> {resolved}: {why}"
+
+
 def create_model(cfg: TrainConfig, mesh: Mesh, seed: int | None = None) -> GW1BModel:
     """Create the model directly sharded across the mesh (params never materialise on one device)."""
+    cfg = resolve_config(cfg)
     n_shards = mesh.size if cfg.run.shard_params else 1
     attn_impl = resolve_attn_impl(cfg.model)
     seed = cfg.run.seed if seed is None else seed

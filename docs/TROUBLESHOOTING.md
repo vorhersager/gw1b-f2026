@@ -32,7 +32,13 @@ shorten `data.seq_len`, make sure `run.shard_params=true`, or lower `XLA_PYTHON_
 **Very slow first step** — XLA compilation (30 s for a 50M model, several minutes for 1.15B). It is cached in
 `$JAX_COMPILATION_CACHE_DIR` on scratch, so the second run is fast. Do not put that cache in `$HOME` (25 GB quota).
 
-**Slow training on V100** — bf16 is emulated on Volta. Use `--set model.dtype=float32` (and expect ~15 TFLOP/s per GPU).
+**Slow training on V100** — bf16 is emulated on Volta (no bf16 tensor cores). `model.dtype: auto` (the default) already
+picks float32 there; if a config forces `bfloat16`, override with `--set model.dtype=float32` and expect ~15 TFLOP/s per GPU.
+
+**`UNIMPLEMENTED: Unsupported algorithm on the current device(s): ALG_DOT_BF16_BF16_F32`** — a bf16 program on a V100
+(or T4): JAX's attention asks XLA for a bf16 dot algorithm that only exists on Ampere and newer. The model now
+computes attention in f32 on those GPUs and `model.dtype: auto` avoids bf16 there altogether; if you still see it,
+`git pull` the repository (fixed 2026-10-03) or add `--set model.dtype=float32`.
 
 **`cudnn` attention error** — `--set model.attn_implementation=xla` (auto-selection picked cuDNN on an unsupported
 shape/GPU). Please report the shape to the instructor.
