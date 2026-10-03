@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SETUP = '''# --- GW1B setup cell (same in every notebook) -------------------------------------------------
 import os, sys, json, time, pathlib
 GW1B_HOME    = os.environ.get("GW1B_HOME", "/SEAS/groups/gw1b/gw1b-f2026")
-GW1B_SCRATCH = os.environ.get("GW1B_SCRATCH", "/lustre/groups/gw1b")
+GW1B_SCRATCH = os.environ.get("GW1B_SCRATCH", "/scratch/gw1b-class")
 GW1B_GROUP   = os.environ.get("GW1B_GROUP", "/SEAS/groups/gw1b")
 USER_DIR     = os.path.join(GW1B_SCRATCH, "users", os.environ.get("USER", "student"))
 os.makedirs(USER_DIR, exist_ok=True)
@@ -52,7 +52,7 @@ print(f"matmul throughput: {2 * 4096**3 / dt / 1e12:.1f} TFLOP/s  (A100 bf16 pea
 | what | where | notes |
 |---|---|---|
 | shared environment, code, tokenizer | `$GW1B_GROUP` (`/SEAS/groups/gw1b`) | persistent, read-only for students |
-| datasets, HF cache, checkpoints | `$GW1B_SCRATCH` (`/lustre/groups/gw1b`) | fast, **purged monthly** — copy results out |
+| datasets, HF cache, checkpoints | `$GW1B_SCRATCH` (`/scratch/gw1b-class`) | fast GPFS, **not backed up** — copy results out |
 | your experiments | `$GW1B_SCRATCH/users/<netid>/runs/<run name>` | `config.yaml`, `metrics.jsonl`, `checkpoints/`, `summary.json` |
 | your home | `~` (25 GB quota) | notebooks, small files only |"""),
     ("code", '''for p in [GW1B_HOME, GW1B_GROUP, GW1B_SCRATCH, USER_DIR]:

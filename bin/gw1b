@@ -8,13 +8,16 @@
 #   gw1b shell [opts]               interactive GPU shell inside the environment
 #   gw1b python ...                 run python in the environment on the login node (CPU: dry-runs, budgets)
 #   gw1b budget ...                 compute-budget calculator (python -m gw1b.budget ...)
-#   gw1b status                     your jobs + free GPUs per partition
+#   gw1b status                     your jobs + idle GPUs by type
 #   gw1b cancel <jobid|all>         cancel jobs
 #   gw1b doctor [--gpu]             check the setup (add --gpu to run a 3-minute GPU smoke test job)
-#   gw1b kernel                     install a "GW1B" Jupyter kernel for Open OnDemand / VS Code
+#   gw1b kernel                     install a "GW1B" Jupyter kernel for the Pegasus Jupyter app / VS Code
 #
-# Job options (all optional): --gpus N  --nodes K  --partition NAME  --time D-HH:MM:SS  --cpus N  --mem 48G
-#                             --name NAME  --chain K (resubmit K times for long runs)  --after JOBID  --cpu
+# Job options (all optional): --gpus N  --gpu-type v100|a100|l40s|gh200|any  --nodes K  --partition NAME  --time D-HH:MM:SS
+#                             --cpus N  --mem 48G  --name NAME  --chain K (resubmit K times for long runs)  --after JOBID  --cpu
+#                             --one-socket (A100 nodes: the 4 GPUs of one CPU socket = two NVLink pairs; HPC's recipe)
+# Pegasus has ONE gpu partition; the GPU model is chosen with --gpu-type (default: $GW1B_GPU_DEFAULT, i.e. V100).
+# gh200 = the Grace Hopper nodes (superChip partition, aarch64 host: needs the arm64 image, see docs/CLUSTER_FACTS.md).
 set -euo pipefail
 GW1B_HOME="${GW1B_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 export GW1B_HOME
@@ -27,18 +30,21 @@ info() { echo "[gw1b] $*"; }
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ------------------------------------------------------------------ option parsing
-OPT_GPUS="$GW1B_DEFAULT_GPUS"; OPT_NODES=1; OPT_PART=""; OPT_TIME=""; OPT_CPUS="$GW1B_DEFAULT_CPUS"; OPT_MEM="$GW1B_DEFAULT_MEM"
+OPT_GPUS="$GW1B_DEFAULT_GPUS"; OPT_GPU_TYPE=""; OPT_NODES=1; OPT_PART=""; OPT_TIME=""; OPT_CPUS="$GW1B_DEFAULT_CPUS"; OPT_MEM="$GW1B_DEFAULT_MEM"
 OPT_NAME=""; OPT_CHAIN=1; OPT_AFTER=""; OPT_CPU=0; OPT_LOCAL_PORT=8888; OPT_ROOT=""; OPT_INFO=0; OPT_STOP=0; OPT_GPU_TEST=0
+OPT_CPUS_SET=0; OPT_MEM_SET=0; OPT_ONE_SOCKET=0
 parse_opts() {   # consumes known options, leaves the rest in REST
     REST=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --gpus|-g)        OPT_GPUS="$2"; shift 2 ;;
+            --gpu-type|-G)    OPT_GPU_TYPE="$2"; shift 2 ;;
+            --one-socket)     OPT_ONE_SOCKET=1; shift ;;
             --nodes|-N)       OPT_NODES="$2"; shift 2 ;;
             --partition|-p)   OPT_PART="$2"; shift 2 ;;
             --time|-t)        OPT_TIME="$2"; shift 2 ;;
-            --cpus|-c)        OPT_CPUS="$2"; shift 2 ;;
-            --mem)            OPT_MEM="$2"; shift 2 ;;
+            --cpus|-c)        OPT_CPUS="$2"; OPT_CPUS_SET=1; shift 2 ;;
+            --mem)            OPT_MEM="$2"; OPT_MEM_SET=1; shift 2 ;;
             --name|-J)        OPT_NAME="$2"; shift 2 ;;
             --chain)          OPT_CHAIN="$2"; shift 2 ;;
             --after)          OPT_AFTER="$2"; shift 2 ;;
@@ -52,21 +58,54 @@ parse_opts() {   # consumes known options, leaves the rest in REST
             *)                REST+=("$1"); shift ;;
         esac
     done
+    # multi-GPU jobs need more cores/RAM for the data loader (HPC's 8xA100 example: 20 cores, 100G)
+    if [[ "$OPT_GPUS" -gt 1 ]]; then
+        if [[ "$OPT_CPUS_SET" == 0 ]]; then OPT_CPUS=$(( OPT_GPUS * 4 > OPT_CPUS ? (OPT_GPUS * 4 > 32 ? 32 : OPT_GPUS * 4) : OPT_CPUS )); fi
+        if [[ "$OPT_MEM_SET" == 0 ]]; then OPT_MEM="$(( OPT_GPUS * 24 > 200 ? 200 : OPT_GPUS * 24 ))G"; fi
+    fi
+    return 0
 }
 
 partition_for() {   # pick a sensible partition if none given
     if [[ -n "$OPT_PART" ]]; then echo "$OPT_PART"
     elif [[ "$OPT_CPU" == 1 ]]; then echo "$GW1B_PART_CPU"
-    elif [[ "$OPT_GPUS" -ge 5 && -n "$GW1B_PART_A100" ]]; then echo "$GW1B_PART_A100"
-    elif [[ "$OPT_GPUS" -ge 3 ]]; then echo "$GW1B_PART_V100_4"
+    elif [[ "${OPT_GPU_TYPE,,}" == gh200 || "${OPT_GPU_TYPE,,}" == superchip ]]; then echo "$GW1B_PART_GH200"
     else echo "$GW1B_DEFAULT_PARTITION"; fi
+}
+
+gpu_type_for() {   # GRES type for --gres=gpu:<type>:N ; 'any' -> no type (Slurm picks any GPU)
+    local t="$OPT_GPU_TYPE"
+    if [[ -z "$t" ]]; then
+        if [[ "$OPT_GPUS" -ge 5 ]]; then t="$GW1B_GPU_A100"       # only the A100 nodes have > 4 GPUs
+        else t="$GW1B_GPU_DEFAULT"; fi
+    fi
+    case "$t" in
+        v100|V100) t="$GW1B_GPU_V100" ;;
+        a100|A100) t="$GW1B_GPU_A100" ;;
+        l40s|L40S|l40) t="$GW1B_GPU_L40S" ;;
+        rtx6000|blackwell|rtx) t="${GW1B_GPU_RTX6000:-rtx6000}" ;;
+        gh200|GH200|superchip|superChip) t="$GW1B_GPU_GH200" ;;
+        any|ANY|"") t="" ;;
+    esac
+    echo "$t"
+}
+
+gres_flag() {   # --gres=gpu[:type]:N  (empty when no GPU requested); one line per flag
+    [[ "$OPT_GPUS" -gt 0 ]] || return 0
+    local t; t="$(gpu_type_for)"
+    if [[ "$OPT_ONE_SOCKET" == 1 ]]; then
+        # HPC's recipe for "half an A100 node": all GPUs from one CPU socket (two NVLink pairs, one NUMA domain)
+        echo "--sockets-per-node=1"; echo "--gpus-per-socket=${t:+$t:}${OPT_GPUS}"; echo "--gres-flags=enforce-binding"
+    else
+        echo "--gres=${GW1B_GRES}${t:+:$t}:${OPT_GPUS}"
+    fi
 }
 
 sbatch_common() {   # common sbatch flags -> printed one per line
     local part; part="$(partition_for)"
     mkdir -p "$USER_DIR/jobs"
     echo "--partition=$part"
-    [[ "$OPT_GPUS" -gt 0 ]] && echo "--gres=${GW1B_GRES}:${OPT_GPUS}"
+    gres_flag
     echo "--cpus-per-task=$OPT_CPUS"
     echo "--mem=$OPT_MEM"
     echo "--time=${OPT_TIME:-$GW1B_DEFAULT_TIME}"
@@ -96,7 +135,7 @@ cmd_setup() {
         info "added to ~/.bashrc: $line"
     else info "~/.bashrc already sources the environment"; fi
     mkdir -p "$USER_DIR/runs" "$USER_DIR/jobs" "$JAX_COMPILATION_CACHE_DIR"
-    info "your scratch folder: $USER_DIR   (checkpoints, runs; purged monthly — copy results to $HOME or the group dir)"
+    info "your scratch folder: $USER_DIR   (checkpoints, runs; scratch is not backed up — copy results to $HOME or the group dir)"
     if [[ ! -d "$HOME/gw1b" ]]; then
         mkdir -p "$HOME/gw1b" && cp -r "$GW1B_HOME/notebooks" "$HOME/gw1b/" && cp -r "$GW1B_HOME/configs" "$HOME/gw1b/"
         info "copied starter notebooks + configs to ~/gw1b/"
@@ -120,7 +159,7 @@ cmd_jupyter() {
     export GW1B_LOCAL_PORT="$OPT_LOCAL_PORT" GW1B_JUPYTER_ROOT="${OPT_ROOT:-$HOME}"
     OPT_NAME="gw1b-jupyter"
     local id; id="$(submit "$GW1B_HOME/slurm/jupyter.sbatch")"
-    info "submitted Jupyter job $id on partition $(partition_for) ($OPT_GPUS GPU, $OPT_TIME). Waiting for it to start..."
+    info "submitted Jupyter job $id on partition $(partition_for) ($OPT_GPUS x $(gpu_type_for) GPU, $OPT_TIME). Waiting for it to start..."
     wait_and_print "$id"
 }
 
@@ -182,7 +221,7 @@ cmd_run() {
         flags+=("--job-name=$OPT_NAME" ${extra[@]+"${extra[@]}"})
         [[ -n "$OPT_AFTER" ]] && flags+=("--dependency=afterany:$OPT_AFTER")
         id="$(sbatch --parsable "${flags[@]}" "$script" "${REST[@]}")" || die "sbatch failed"; id="${id%%;*}"
-        info "submitted job $id (${OPT_NODES} node(s) x ${OPT_GPUS} GPU, partition $(partition_for), ${OPT_TIME:-$GW1B_DEFAULT_TIME})${prev:+ after $prev}"
+        info "submitted job $id (${OPT_NODES} node(s) x ${OPT_GPUS} $(gpu_type_for) GPU, partition $(partition_for), ${OPT_TIME:-$GW1B_DEFAULT_TIME})${prev:+ after $prev}"
         prev="$id"
     done
     info "output: $USER_DIR/jobs/$OPT_NAME-<jobid>.out     status: gw1b status"
@@ -192,20 +231,20 @@ cmd_shell() {
     parse_opts "$@"
     local part; part="$(partition_for)"
     local -a flags=("--partition=$part" "--cpus-per-task=$OPT_CPUS" "--mem=$OPT_MEM" "--time=${OPT_TIME:-$GW1B_DEFAULT_TIME}" "--job-name=gw1b-shell")
-    [[ "$OPT_GPUS" -gt 0 ]] && flags+=("--gres=${GW1B_GRES}:${OPT_GPUS}")
+    local -a g; mapfile -t g < <(gres_flag); flags+=(${g[@]+"${g[@]}"})
     [[ -n "$GW1B_ACCOUNT" ]] && flags+=("--account=$GW1B_ACCOUNT")
     [[ -n "$GW1B_QOS" ]] && flags+=("--qos=$GW1B_QOS")
-    info "requesting an interactive shell: partition $part, $OPT_GPUS GPU(s), ${OPT_TIME:-$GW1B_DEFAULT_TIME} (type 'exit' to release it)"
+    info "requesting an interactive shell: partition $part, $OPT_GPUS x $(gpu_type_for) GPU(s), ${OPT_TIME:-$GW1B_DEFAULT_TIME} (type 'exit' to release it)"
     exec srun "${flags[@]}" $GW1B_SBATCH_EXTRA --export=ALL,GW1B_HOME="$GW1B_HOME" --pty gw1b-exec bash -l
 }
 
 cmd_status() {
-    echo "== your jobs =="; squeue -u "$USER" -o "%.10i %-18j %-12P %.3D %.10T %.10M %.10l %R" 2>&1
-    echo; echo "== GPU partitions (nodes idle/allocated, GRES) =="
-    local parts="$GW1B_PART_DEBUG,$GW1B_PART_V100_2,$GW1B_PART_V100_4"
-    [[ -n "$GW1B_PART_A100" ]] && parts="$parts,$GW1B_PART_A100"
-    [[ -n "$GW1B_PART_L40S" ]] && parts="$parts,$GW1B_PART_L40S"
-    sinfo -p "$parts" -o "%-12P %-6a %-10l %-14F %-20G" 2>&1 || true
+    echo "== your jobs =="; squeue -u "$USER" -o "%.10i %-18j %-10P %.3D %.10T %.10M %.10l %R" 2>&1
+    echo; echo "== GPU nodes in partition $GW1B_PART_GPU by GRES type and state (idle = free now) =="
+    sinfo -N -h -p "$GW1B_PART_GPU" -o "%G %t" 2>/dev/null | awk '{n[$1" "$2]++} END {for (k in n) printf "  %4d nodes  %s\n", n[k], k}' | sort -k3,3 -k4,4 || true
+    echo "   (request a type with --gpu-type v100|a100|l40s; default $GW1B_GPU_DEFAULT)"
+    echo; echo "== Grace Hopper nodes (partition $GW1B_PART_GH200, --gpu-type gh200, needs the arm64 image) =="
+    sinfo -N -h -p "$GW1B_PART_GH200" -o "%t" 2>/dev/null | sort | uniq -c | awk '{printf "  %4d nodes  %s\n", $1, $2}' || true
     echo; echo "== running Jupyter =="; cmd_jupyter --info
 }
 
@@ -227,7 +266,7 @@ cmd_doctor() {
     check "an environment can be started (gw1b-exec)"  'gw1b-exec python -c "import jax, flax, optax, orbax.checkpoint, sentencepiece, gw1b" 2>/dev/null'
     check "Slurm commands available"                   'command -v sbatch >/dev/null && command -v squeue >/dev/null'
     check "partition '$GW1B_DEFAULT_PARTITION' exists" 'sinfo -h -p "$GW1B_DEFAULT_PARTITION" 2>/dev/null | grep -q .'
-    [[ -z "$GW1B_PART_A100" ]] && printf '  [warn] GW1B_PART_A100 is not set in gw1b.env (run slurm/discover_cluster.sh to find the A100 partition)\n'
+    check "GPU type '$GW1B_GPU_DEFAULT' exists in $GW1B_PART_GPU (sinfo %G)" 'sinfo -N -h -p "$GW1B_PART_GPU" -o %G 2>/dev/null | grep -qi "gpu:$GW1B_GPU_DEFAULT"'
     check "home quota not full (df on \$HOME)"          '[[ $(df --output=pcent "$HOME" 2>/dev/null | tail -1 | tr -dc 0-9) -lt 95 ]]'
     gw1b-exec python -c "import jax, flax; print('  [info] jax', jax.__version__, 'flax', flax.__version__, '(login node backend:', jax.default_backend() + ')')" 2>/dev/null || true
     if [[ "$OPT_GPU_TEST" == 1 ]]; then
@@ -257,7 +296,7 @@ cmd_kernel() {
   "env": {"GW1B_HOME": "$GW1B_HOME"}
 }
 EOF
-    info "installed Jupyter kernel 'GW1B (JAX)' at $dir — select it in Open OnDemand JupyterLab or VS Code"
+    info "installed Jupyter kernel 'GW1B (JAX)' at $dir — select it in the Pegasus Jupyter app (it reads this folder) or VS Code"
 }
 
 # ------------------------------------------------------------------ dispatch
@@ -270,6 +309,8 @@ case "$cmd" in
               parse_opts "$@"
               args=()
               [[ "$OPT_GPUS" != "$GW1B_DEFAULT_GPUS" ]] && args+=(--gpus "$OPT_GPUS")
+              [[ -n "$OPT_GPU_TYPE" ]] && args+=(--gpu-type "$OPT_GPU_TYPE")
+              [[ "$OPT_ONE_SOCKET" == 1 ]] && args+=(--one-socket)
               [[ "$OPT_NODES" != 1 ]] && args+=(--nodes "$OPT_NODES")
               [[ -n "$OPT_PART" ]] && args+=(--partition "$OPT_PART")
               [[ -n "$OPT_TIME" ]] && args+=(--time "$OPT_TIME")

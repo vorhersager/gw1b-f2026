@@ -23,7 +23,7 @@ That is it — `!nvidia-smi`, `import jax; jax.devices()`, all the `gw1b` notebo
 | `pip install` | works | disabled on purpose (shared, pinned environment) — ask the instructor |
 | Drive mount (`drive.mount`) | works | not available (the runtime is not a Google VM); use Pegasus storage, `scp`, or GitHub |
 | session limit | ~12 h / idle disconnects | your job's `--time` (default 4 h); the tunnel must stay open |
-| internet from the kernel | yes | Pegasus compute nodes may have no outbound internet → datasets are pre-downloaded to `$HF_HOME` |
+| internet from the kernel | yes | yes (HPC confirmed compute nodes download freely); the class datasets are still pre-tokenized under `$GW1B_SCRATCH/data` |
 
 Notebooks saved "in Drive" are just the `.ipynb` file on Google's side; the data stays on Pegasus. If you
 prefer to keep notebooks on Pegasus too, use the JupyterLab URL instead of Colab — same kernel, same job.

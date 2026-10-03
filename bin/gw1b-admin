@@ -92,7 +92,7 @@ cmd_init() {
     local group scratch ugroup host
     local ugroup_guess; ugroup_guess="$(id -Gn | tr ' ' '\n' | grep -i -m1 gw1b || id -gn)"
     ask group   "Persistent group directory (NOT purged)" "${GW1B_GROUP}"
-    ask scratch "Lustre scratch directory (purged monthly)" "${GW1B_SCRATCH}"
+    ask scratch "Scratch directory (GPFS /scratch/<group>; not backed up)" "${GW1B_SCRATCH}"
     ask ugroup  "Unix group of the class (students are members)" "${ugroup_guess:-$GW1B_UNIX_GROUP}"
     ask host    "Login host students ssh to" "${GW1B_LOGIN_HOST}"
     env_set GW1B_GROUP "$group"; env_set GW1B_SCRATCH "$scratch"; env_set GW1B_UNIX_GROUP "$ugroup"; env_set GW1B_LOGIN_HOST "$host"
@@ -150,54 +150,59 @@ cmd_discover() {
     info "full dump (for the record, includes a 3-minute GPU-node probe) -> $facts"
     GW1B_HOME="$THIS_HOME" bash "$THIS_HOME/slurm/discover_cluster.sh" > "$facts" 2>&1 || true
 
-    # --- partitions -------------------------------------------------------
+    # --- partitions: Pegasus has ONE gpu partition; GPU models are GRES types -------------------
     local parts; parts="$(sinfo -h -o '%P' | tr -d '*' | sort -u | tr '\n' ' ')"
     info "partitions: $parts"
-    local p
-    for p in GW1B_PART_DEBUG GW1B_PART_V100_2 GW1B_PART_V100_4 GW1B_PART_CPU GW1B_PART_DEBUG_CPU; do
-        local cur="${!p}"
-        if [[ " $parts " == *" $cur "* ]]; then ok "$p=$cur exists"
+    local gpupart; gpupart="$(sinfo -N -h -o '%P %G' 2>/dev/null | grep -i ' gpu' | awk '{print $1}' | tr -d '*' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}')"
+    if [[ -n "$gpupart" ]]; then
+        [[ "$gpupart" == "$GW1B_PART_GPU" ]] && ok "GPU partition: $gpupart" || { warn "GPU nodes are in partition '$gpupart' (gw1b.env said $GW1B_PART_GPU)"; env_set GW1B_PART_GPU "$gpupart"; }
+    else warn "no partition with gpu GRES found — check 'sinfo -o \"%P %G\"' and set GW1B_PART_GPU in gw1b.env"; fi
+    local cpupart; cpupart="$(sinfo -h -o '%P' | grep '\*' | tr -d '*' | head -1)"
+    if [[ -n "$cpupart" ]]; then
+        [[ "$cpupart" == "$GW1B_PART_CPU" ]] && ok "CPU (default) partition: $cpupart" || { info "default partition is '$cpupart' (gw1b.env said $GW1B_PART_CPU)"; env_set GW1B_PART_CPU "$cpupart"; }
+    fi
+    if [[ " $parts " != *" $GW1B_PART_DEBUG_CPU "* ]]; then warn "short CPU test partition '$GW1B_PART_DEBUG_CPU' not found — set GW1B_PART_DEBUG_CPU (or leave; it is only used by tests)"; fi
+    load_env
+    # GPU types = GRES types on the gpu partition, e.g. gpu:v100:4 gpu:a100:8
+    local gres_types; gres_types="$(sinfo -N -h -p "$GW1B_PART_GPU" -o '%G' 2>/dev/null | tr ',' '\n' | grep -i '^gpu:' | cut -d: -f2 | grep -v '^[0-9]*$' | sort | uniq -c | sort -rn | awk '{print $2"("$1")"}' | tr '\n' ' ')"
+    info "GPU GRES types on $GW1B_PART_GPU (nodes): ${gres_types:-none listed}"
+    local var pat found
+    for var in GW1B_GPU_V100:v100 GW1B_GPU_A100:a100 GW1B_GPU_L40S:l40 GW1B_GPU_RTX6000:rtx; do
+        pat="${var#*:}"; var="${var%%:*}"
+        found="$(printf '%s\n' ${gres_types} | grep -i -m1 "^${pat}" | cut -d'(' -f1 || true)"
+        if [[ -n "$found" ]]; then
+            [[ "$found" == "${!var}" ]] && ok "$var=$found" || { ok "$var: '$found' (was '${!var}')"; env_set "$var" "$found"; }
         else
-            local guess=""
-            case "$p" in
-                GW1B_PART_DEBUG)     guess="$(sinfo -h -o '%P' | tr -d '*' | grep -i -m1 'debug.*gpu\|gpu.*debug' || true)" ;;
-                GW1B_PART_V100_2)    guess="$(find_partition 'v100:2|gpu:2')" ;;
-                GW1B_PART_V100_4)    guess="$(find_partition 'v100:4|gpu:4')" ;;
-                GW1B_PART_CPU)       guess="$(sinfo -h -o '%P' | grep '\*' | tr -d '*' | head -1)" ;;
-                GW1B_PART_DEBUG_CPU) guess="$(sinfo -h -o '%P' | tr -d '*' | grep -i -m1 'debug.*cpu\|cpu.*debug' || true)" ;;
-            esac
-            warn "$p=$cur does not exist${guess:+; best guess: $guess}"
-            local v; ask v "$p" "${guess:-$cur}"; env_set "$p" "$v"
+            [[ -n "${!var}" ]] && warn "$var='${!var}' is not a GRES type on $GW1B_PART_GPU (nodes may be offline, or the name differs — check 'sinfo -o %G')" || info "$var: none yet (optional)"
         fi
     done
-    local a100 l40 gh
-    a100="$(find_partition 'a100')"; l40="$(find_partition 'l40')"; gh="$(find_partition 'h100|gh200|hopper')"
-    if [[ -n "$a100" ]]; then ok "A100 nodes are in partition '$a100'"; env_set GW1B_PART_A100 "$a100"
-    else warn "no partition with 'a100' in its GRES/features — ask HPC support and set GW1B_PART_A100 in gw1b.env"; fi
-    if [[ -n "$l40" ]]; then ok "L40S nodes are in partition '$l40'"; env_set GW1B_PART_L40S "$l40"; else info "no L40S partition detected (optional)"; fi
-    [[ -n "$gh" ]] && info "Grace Hopper (ARM) nodes are in partition '$gh' — not usable with the x86 image, see docs/CLUSTER_FACTS.md"
+    # Grace Hopper partition: GRES type (if any) for --gpu-type gh200
+    if [[ " $parts " == *" $GW1B_PART_GH200 "* ]]; then
+        local ghg; ghg="$(sinfo -N -h -p "$GW1B_PART_GH200" -o '%G' 2>/dev/null | tr ',' '\n' | grep -i '^gpu:' | cut -d: -f2 | grep -iE 'gh200|h100|hopper' | sort -u | head -1 || true)"
+        if [[ -n "$ghg" ]]; then env_set GW1B_GPU_GH200 "$ghg"; ok "Grace Hopper partition $GW1B_PART_GH200: GRES type '$ghg' (needs the arm64 image, see docs/CLUSTER_FACTS.md)"
+        else ok "Grace Hopper partition $GW1B_PART_GH200 exists (untyped GRES; needs the arm64 image)"; fi
+    else info "no '$GW1B_PART_GH200' partition (GH200 nodes) visible"; fi
     load_env
-    # time limit of the partition used for the long run
-    local longp="${GW1B_PART_A100:-$GW1B_PART_V100_4}" maxt
-    maxt="$(sinfo -h -p "$longp" -o '%l' 2>/dev/null | head -1)"
-    if [[ -n "$maxt" && "$maxt" != "infinite" && "$maxt" != "UNLIMITED" ]]; then env_set GW1B_MAX_TIME "$maxt"; ok "wall-time limit of $longp: $maxt -> GW1B_MAX_TIME"
-    else info "wall-time limit of $longp: ${maxt:-unknown} (GW1B_MAX_TIME stays $GW1B_MAX_TIME)"; fi
+    local maxt; maxt="$(sinfo -h -p "$GW1B_PART_GPU" -o '%l' 2>/dev/null | head -1)"
+    if [[ -n "$maxt" && "$maxt" != "infinite" && "$maxt" != "UNLIMITED" ]]; then env_set GW1B_MAX_TIME "$maxt"; ok "wall-time limit of $GW1B_PART_GPU: $maxt -> GW1B_MAX_TIME"
+    else info "wall-time limit of $GW1B_PART_GPU: ${maxt:-unknown} (GW1B_MAX_TIME stays $GW1B_MAX_TIME)"; fi
 
     # --- account / gres: validate a job spec without submitting ---------------
-    local gres="${GW1B_GRES}" acct=""
-    if sbatch_test --partition="$GW1B_PART_DEBUG" --gres="$gres:1"; then
-        ok "sbatch accepts --partition=$GW1B_PART_DEBUG --gres=$gres:1 without an account"
+    local gres="${GW1B_GRES}:${GW1B_GPU_DEFAULT}" acct=""
+    if sbatch_test --partition="$GW1B_PART_GPU" --gres="$gres:1"; then
+        ok "sbatch accepts --partition=$GW1B_PART_GPU --gres=$gres:1 without an account"
     else
         local err; err="$(cat "$TMP/sbatch.err")"
         info "sbatch --test-only said: ${err##*: }"
         if grep -qi 'gres\|generic resource' "$TMP/sbatch.err"; then
-            local g2; g2="$(sinfo -h -p "$GW1B_PART_DEBUG" -o '%G' | head -1 | cut -d: -f1-2)"   # gpu:v100:2 -> gpu:v100
-            if [[ -n "$g2" ]] && sbatch_test --partition="$GW1B_PART_DEBUG" --gres="$g2:1"; then gres="$g2"; env_set GW1B_GRES "$gres"; ok "GRES syntax is --gres=$gres:N"; fi
+            if sbatch_test --partition="$GW1B_PART_GPU" --gres="${GW1B_GRES}:1"; then
+                warn "typed GRES ($gres:1) is refused but untyped (${GW1B_GRES}:1) works — set GW1B_GPU_DEFAULT=any in gw1b.env or fix the type names above"
+            fi
         fi
         if grep -qi 'account' "$TMP/sbatch.err"; then
             local a
             for a in $(sacctmgr -nP show assoc where user="$USER" format=account 2>/dev/null | sort -u); do
-                if sbatch_test --partition="$GW1B_PART_DEBUG" --gres="$gres:1" --account="$a"; then acct="$a"; break; fi
+                if sbatch_test --partition="$GW1B_PART_GPU" --gres="$gres:1" --account="$a"; then acct="$a"; break; fi
             done
             if [[ -n "$acct" ]]; then env_set GW1B_ACCOUNT "$acct"; ok "jobs need --account=$acct -> GW1B_ACCOUNT"
             else warn "sbatch wants an account but none of yours worked ($(sacctmgr -nP show assoc where user="$USER" format=account 2>/dev/null | sort -u | tr '\n' ' ')); ask HPC support"; fi
@@ -224,8 +229,8 @@ cmd_discover() {
 
     # --- GPU node probe: driver version decides whether the CUDA 12 wheels run -------------
     if [[ "$GPU_TEST" == 1 ]]; then
-        info "probing a GPU node on $GW1B_PART_DEBUG (waits for a free GPU, up to 5 minutes)..."
-        local -a sflags=("--partition=$GW1B_PART_DEBUG" "--gres=$gres:1" "--time=00:03:00" "--job-name=gw1b-probe")
+        info "probing a $GW1B_GPU_DEFAULT node on $GW1B_PART_GPU (waits for a free GPU, up to 5 minutes)..."
+        local -a sflags=("--partition=$GW1B_PART_GPU" "--gres=$gres:1" "--time=00:03:00" "--job-name=gw1b-probe")
         [[ -n "${GW1B_ACCOUNT:-}" ]] && sflags+=("--account=$GW1B_ACCOUNT")
         local probe
         probe="$(timeout 330 srun "${sflags[@]}" bash -c 'nvidia-smi --query-gpu=driver_version,name,memory.total,compute_cap --format=csv,noheader | head -1; echo "CTR:$(command -v apptainer || command -v singularity || echo none)"; echo "NET:$(curl -s -o /dev/null -w %{http_code} --max-time 6 https://huggingface.co || echo ERR)"' 2>/dev/null)"
@@ -237,7 +242,8 @@ cmd_discover() {
             local nctr; nctr="$(printf '%s\n' "$probe" | sed -n 's/^CTR://p')"
             [[ "$nctr" == "none" || -z "$nctr" ]] && warn "no apptainer/singularity in PATH on the compute node (module? set GW1B_APPTAINER_MODULE)" || ok "compute node has $nctr"
             local nnet; nnet="$(printf '%s\n' "$probe" | sed -n 's/^NET://p')"
-            [[ "$nnet" == "200" ]] && ok "compute nodes reach the internet (huggingface.co)" || info "compute nodes have no internet ($nnet) — downloads happen on the login node (already the default)"
+            if [[ "$nnet" == "200" ]]; then ok "compute nodes reach the internet (huggingface.co)"; env_set GW1B_COMPUTE_INTERNET yes
+            else info "compute nodes have no internet ($nnet) — downloads will happen on the login node"; env_set GW1B_COMPUTE_INTERNET no; fi
         else
             warn "could not run the GPU probe (queue busy or partition/gres wrong) — re-run 'gw1b-admin discover' later or check $facts"
         fi
@@ -254,15 +260,33 @@ cmd_build() {
     if [[ "$mode" == auto ]]; then mode=$([[ -n "$ctr" ]] && echo sif || echo venv); fi
     if [[ "$mode" == sif ]]; then
         if [[ -e "$GW1B_SIF" && "$FORCE" != 1 ]]; then ok "container exists: $GW1B_SIF (use --force to rebuild)"; return; fi
-        info "building the container on this login node (~10 min, needs internet; docker.io + PyPI)"
-        if ! "$THIS_HOME/env/build_sif.sh"; then
-            warn "container build failed. Options: (a) ask HPC support to enable 'apptainer build --fakeroot',"
-            warn "(b) build on any Linux/Docker machine (env/build_sif.sh comments) and copy the .sif to $GW1B_GROUP/sif/,"
-            warn "(c) fall back to the venv:  gw1b-admin build venv"
-            return 1
+        local fakeroot=0; grep -qs "^$USER:" /etc/subuid && fakeroot=1
+        if [[ "$fakeroot" == 0 && -n "${GW1B_IMAGE:-}" ]]; then
+            info "no fakeroot on this node -> pulling the prebuilt image docker://$GW1B_IMAGE (built by GitHub Actions from env/Dockerfile; ~7 GB, 10-20 min)"
+            if ! "$THIS_HOME/env/build_sif.sh" --from-image "$GW1B_IMAGE"; then
+                warn "pull failed. Is the image published? (GitHub: Actions -> 'build-image' -> run it, or push a tag env-$GW1B_ENV_VERSION)."
+                warn "Alternatives: build with Docker on a laptop (env/build_sif.sh comments) and copy the .sif to $GW1B_GROUP/sif/,"
+                warn "ask HPC staff to build env/gw1b.def for you, or fall back to the venv:  gw1b-admin build venv"
+                return 1
+            fi
+        else
+            info "building the container from env/gw1b.def on this node (~10 min, needs internet; docker.io + PyPI)"
+            if ! "$THIS_HOME/env/build_sif.sh"; then
+                warn "container build failed. Options: (a) set GW1B_IMAGE in gw1b.env and re-run (pulls the GitHub-built image),"
+                warn "(b) build on any Linux/Docker machine (env/build_sif.sh comments) and copy the .sif to $GW1B_GROUP/sif/,"
+                warn "(c) fall back to the venv:  gw1b-admin build venv"
+                return 1
+            fi
         fi
         chgrp "$GW1B_UNIX_GROUP" "$GW1B_GROUP"/sif/* 2>/dev/null; chmod g+r "$GW1B_GROUP"/sif/* 2>/dev/null
         ok "container ready: $GW1B_SIF"
+    elif [[ "$mode" == arm64 ]]; then
+        [[ -n "${GW1B_IMAGE_ARM64:-}" ]] || die "set GW1B_IMAGE_ARM64 in gw1b.env (run the build-image workflow with arm64=true first)"
+        if [[ -e "$GW1B_SIF_ARM64" && "$FORCE" != 1 ]]; then ok "arm64 container exists: $GW1B_SIF_ARM64 (use --force to rebuild)"; return; fi
+        info "pulling the aarch64 image docker://$GW1B_IMAGE_ARM64 for the Grace Hopper (superChip) nodes"
+        "$THIS_HOME/env/build_sif.sh" --arch arm64 --from-image "$GW1B_IMAGE_ARM64" || { warn "arm64 pull failed"; return 1; }
+        chgrp "$GW1B_UNIX_GROUP" "$GW1B_GROUP"/sif/* 2>/dev/null; chmod g+r "$GW1B_GROUP"/sif/* 2>/dev/null
+        ok "arm64 container ready: $GW1B_SIF_ARM64 — test with:  gw1b doctor --gpu --gpu-type gh200"
     else
         if [[ -x "$GW1B_VENV/bin/python" && "$FORCE" != 1 ]]; then ok "venv exists: $GW1B_VENV (use --force to rebuild)"; return; fi
         info "building the shared venv with uv (~5 min, needs internet)"
@@ -299,26 +323,38 @@ cmd_data() {
     local shards="$GW1B_SCRATCH/data/fineweb-edu-${SAMPLE%BT}B"
     mkdir -p "$GW1B_SCRATCH/users/$USER/jobs" "$GW1B_GROUP/tokenizer"
 
-    info "1) download sample-$SAMPLE into $HF_HOME (login node, resumable; 10BT = ~28 GB)"
-    if [[ "$SKIP_DL" == 1 ]]; then ok "skipped (--skip-download)"
-    elif ! "$THIS_HOME/bin/gw1b-exec" python -m gw1b.prepare_data download --sample "$SAMPLE"; then die "download failed (internet from the login node? HF_HOME writable?)"; fi
+    local dljob=""
+    if [[ "$SKIP_DL" == 1 ]]; then info "1) download: skipped (--skip-download)"
+    elif [[ "${GW1B_COMPUTE_INTERNET:-yes}" == yes ]]; then
+        info "1) download sample-$SAMPLE into $HF_HOME as a CPU job (compute nodes have internet; 10BT = ~28 GB, resumable)"
+        dljob="$(submit gw1b-download "$GW1B_PART_CPU" 6:00:00 8 32G -- -m gw1b.prepare_data download --sample "$SAMPLE")" || die "sbatch failed"
+        ok "submitted download job $dljob — the steps below wait for it"
+    else
+        info "1) download sample-$SAMPLE into $HF_HOME (login node, resumable; 10BT = ~28 GB)"
+        "$THIS_HOME/bin/gw1b-exec" python -m gw1b.prepare_data download --sample "$SAMPLE" || die "download failed (internet from the login node? HF_HOME writable?)"
+    fi
 
+    local corpjob=""
     info "2) tokenizer training corpus (2 GB of text)"
     if [[ -s "$corpus" && "$FORCE" != 1 ]]; then ok "exists: $corpus"
+    elif [[ -n "$dljob" ]]; then
+        corpjob="$(submit gw1b-corpus "$GW1B_PART_CPU" 2:00:00 4 32G "--dependency=afterok:$dljob" -- -m gw1b.prepare_data sample-text --sample "$SAMPLE" --out "$corpus" --mb 2000)" || die "sbatch failed"
+        ok "submitted corpus job $corpjob (after $dljob)"
     else "$THIS_HOME/bin/gw1b-exec" python -m gw1b.prepare_data sample-text --sample "$SAMPLE" --out "$corpus" --mb 2000 || die "sample-text failed"; fi
 
     local tokjob=""
     info "3) tokenizer: $tokname ($TOK_TYPE, vocab $VOCAB) as a CPU job"
     if [[ -s "$tokmodel" && "$FORCE" != 1 ]]; then ok "exists: $tokmodel"
     else
-        tokjob="$(submit gw1b-tokenizer "$GW1B_PART_CPU" 3:00:00 32 64G -- -m gw1b.tokenizer train --input "$corpus" --out "${tokmodel%.model}" --vocab "$VOCAB" --type "$TOK_TYPE")" || die "sbatch failed"
-        ok "submitted tokenizer job $tokjob"
+        local -a tdep=(); [[ -n "$corpjob" ]] && tdep=("--dependency=afterok:$corpjob")
+        tokjob="$(submit gw1b-tokenizer "$GW1B_PART_CPU" 3:00:00 32 64G ${tdep[@]+"${tdep[@]}"} -- -m gw1b.tokenizer train --input "$corpus" --out "${tokmodel%.model}" --vocab "$VOCAB" --type "$TOK_TYPE")" || die "sbatch failed"
+        ok "submitted tokenizer job $tokjob${corpjob:+ (after $corpjob)}"
     fi
 
     info "4) token shards -> $shards (CPU job, 40 cores, ~1-2 h for 10B tokens)"
     if [[ -d "$shards/train" && "$FORCE" != 1 ]] && ls "$shards"/train/*.bin >/dev/null 2>&1; then ok "exists: $shards"
     else
-        local -a dep=(); [[ -n "$tokjob" ]] && dep=("--dependency=afterok:$tokjob")
+        local -a dep=(); [[ -n "$tokjob" ]] && dep=("--dependency=afterok:$tokjob"); [[ -z "$tokjob" && -n "$dljob" ]] && dep=("--dependency=afterok:$dljob")
         local -a flags=("--parsable" "--partition=$GW1B_PART_CPU" "--output=$GW1B_SCRATCH/users/$USER/jobs/%x-%j.out" "--export=ALL,GW1B_HOME=$GW1B_HOME" ${dep[@]+"${dep[@]}"})
         [[ -n "${GW1B_ACCOUNT:-}" ]] && flags+=("--account=$GW1B_ACCOUNT")
         local job; job="$(sbatch "${flags[@]}" "$THIS_HOME/slurm/tokenize.sbatch" --sample "$SAMPLE" --tokenizer "$tokmodel" --out "$shards")" || die "sbatch failed"
@@ -346,7 +382,13 @@ cmd_students() {
     cat > "$THIS_HOME/ONBOARDING.md" <<EOF
 # GW1B on Pegasus — getting started (send this to the students)
 
-You need: a Pegasus account (requested for the class), the GW VPN when off campus, and a terminal.
+You need: (1) a Pegasus account — submit the **HPC Access Request form** with your **SSH public key**
+(\`ssh-keygen -t ed25519\` on your laptop, then paste the contents of \`~/.ssh/id_ed25519.pub\`); accounts are created one
+by one, so do this today; (2) the GW network or **GW VPN** when off campus; (3) at your first login, the single-use
+code HPC emails you (subject "HPC Pegasus 2FA") — then **set up 2FA immediately** (https://github.com/gwuniversity/hpc-onboarding,
+"00 First Steps / 02 Initial Login + 2FA Setup") or you will be locked out; (4) a terminal.
+Every new ssh connection asks for the 2FA code; the laptop script below reuses one connection for the tunnel.
+HPC office hours (Zoom, Tue/Thu 12:30–14:30): https://gwu-edu.zoom.us/j/91295945575 · tickets: hpchelp@gwu.edu
 
 ## One-time setup (5 minutes)
 \`\`\`bash
@@ -358,10 +400,12 @@ gw1b doctor         # all lines [ok]?
 
 ## Every day: a GPU JupyterLab (also usable from Google Colab)
 \`\`\`bash
-gw1b jupyter        # waits for a GPU, then prints the ssh-tunnel line and the URL
+gw1b jupyter        # waits for a V100, then prints the ssh-tunnel line and the URL  (--gpu-type a100 for an A100)
 \`\`\`
 Run the printed \`ssh -N -L …\` line in a terminal **on your laptop**, then open the URL — or in Colab:
 *Connect ▾ → Connect to a local runtime* and paste the URL. Start with \`~/gw1b/notebooks/00_hello_pegasus.ipynb\`.
+No terminal? The Open OnDemand portal $GW1B_OOD_URL has a *Jupyter Notebook Pegasus* app: run \`gw1b kernel\` once on the
+login node, then pick the **GW1B (JAX)** kernel in the app (review every field before Launch).
 
 One command from the laptop instead: \`laptop/gw1b-connect.sh <netid>\` (macOS/Linux) or
 \`laptop\\gw1b-connect.ps1 <netid>\` (Windows) — both are in $GW1B_HOME/laptop and in the class repo.
@@ -384,7 +428,7 @@ cmd_status() {
     [[ -d "$GW1B_GROUP" ]] && ok "group dir $GW1B_GROUP" || fail "group dir $GW1B_GROUP missing (init)"
     [[ -d "$GW1B_SCRATCH/users" ]] && ok "scratch layout $GW1B_SCRATCH" || fail "scratch layout missing (init)"
     [[ "$(readlink -f "$THIS_HOME")" == "$(readlink -f "$GW1B_HOME" 2>/dev/null)" ]] && ok "repo at $GW1B_HOME" || warn "repo is at $THIS_HOME, gw1b.env says $GW1B_HOME (init)"
-    [[ -n "$GW1B_PART_A100" ]] && ok "A100 partition: $GW1B_PART_A100" || warn "GW1B_PART_A100 empty (discover / HPC support)"
+    ok "GPU partition $GW1B_PART_GPU; GRES types v100=$GW1B_GPU_V100 a100=$GW1B_GPU_A100 l40s=${GW1B_GPU_L40S:-?} rtx6000=${GW1B_GPU_RTX6000:-not yet}"
     [[ -f "$THIS_HOME/docs/CLUSTER_FACTS.generated.md" ]] && ok "cluster facts recorded" || warn "no docs/CLUSTER_FACTS.generated.md (discover)"
     if [[ -e "$GW1B_SIF" ]]; then ok "container $GW1B_SIF"; elif [[ -x "$GW1B_VENV/bin/python" ]]; then ok "venv $GW1B_VENV"; else fail "no environment built (build)"; fi
     ls "$GW1B_SCRATCH/users/$USER/jobs"/gw1b-smoke-*.out >/dev/null 2>&1 && grep -q "SMOKE TEST PASSED" "$GW1B_SCRATCH/users/$USER/jobs"/gw1b-smoke-*.out 2>/dev/null && ok "GPU smoke test passed" || warn "GPU smoke test not passed yet (test)"
@@ -402,7 +446,7 @@ cmd_all() {
     [[ "$YES" == 1 ]] || { confirm "build the environment now?" || exit 0; }
     cmd_build auto || exit 1
     cmd_test || { warn "fix the failures above, then re-run: gw1b-admin test"; exit 1; }
-    [[ "$YES" == 1 ]] || { confirm "start the data pipeline (download ~28 GB + two CPU jobs)?" || exit 0; }
+    [[ "$YES" == 1 ]] || { confirm "start the data pipeline (download ~28 GB + CPU jobs)?" || exit 0; }
     cmd_data
     cmd_students
     printf '\n'; cmd_status
@@ -413,7 +457,7 @@ case "$cmd" in
     all) cmd_all ;;
     init) cmd_init ;;
     discover) cmd_discover ;;
-    build) cmd_build "${1:-auto}" ;;
+    build) cmd_build "${1:-auto}" ;;   # auto | sif | venv | arm64
     test) cmd_test ;;
     data) cmd_data ;;
     students) cmd_students ;;

@@ -34,7 +34,7 @@ them in `$GW1B_SCRATCH/teams/team<N>/runs` (`--set run.out_dir=…`).
   `train.py:build_optimizer` (anything in `optax`).
 * Throughput work: `run.profile=true` writes a JAX profiler trace (`<run>/profile`, open in TensorBoard); watch `perf/mfu`.
   Compare `attn_implementation`, batch sizes, `XLA_FLAGS`, single vs multi-node.
-* The production run: `gw1b train --gpus 8 --partition $GW1B_PART_A100 --time $GW1B_MAX_TIME --chain 8 --config configs/gw1b_1p15b.yaml --set run.out_dir=$GW1B_SCRATCH/checkpoints`.
+* The production run: `gw1b train --gpus 8 --gpu-type a100 --time 1-00:00:00 --chain 4 --config configs/gw1b_1p15b.yaml --set run.out_dir=$GW1B_SCRATCH/checkpoints`.
   Pilot first (`--set run.total_tokens=5e9`), then the real run; it resumes across chained jobs. Optional: MaxText
   comparison in the same container.
 * Deliverable: the trainer recipe (final YAML), the base checkpoint, `metrics.jsonl` of the run.
