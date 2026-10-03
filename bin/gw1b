@@ -13,9 +13,11 @@
 #   gw1b doctor [--gpu]             check the setup (add --gpu to run a 3-minute GPU smoke test job)
 #   gw1b kernel                     install a "GW1B" Jupyter kernel for the Pegasus Jupyter app / VS Code
 #
-# Job options (all optional): --gpus N  --gpu-type v100|a100|l40s|any  --nodes K  --partition NAME  --time D-HH:MM:SS
+# Job options (all optional): --gpus N  --gpu-type v100|a100|l40s|gh200|any  --nodes K  --partition NAME  --time D-HH:MM:SS
 #                             --cpus N  --mem 48G  --name NAME  --chain K (resubmit K times for long runs)  --after JOBID  --cpu
+#                             --one-socket (A100 nodes: the 4 GPUs of one CPU socket = two NVLink pairs; HPC's recipe)
 # Pegasus has ONE gpu partition; the GPU model is chosen with --gpu-type (default: $GW1B_GPU_DEFAULT, i.e. V100).
+# gh200 = the Grace Hopper nodes (superChip partition, aarch64 host: needs the arm64 image, see docs/CLUSTER_FACTS.md).
 set -euo pipefail
 GW1B_HOME="${GW1B_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 export GW1B_HOME
@@ -30,13 +32,14 @@ usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
 # ------------------------------------------------------------------ option parsing
 OPT_GPUS="$GW1B_DEFAULT_GPUS"; OPT_GPU_TYPE=""; OPT_NODES=1; OPT_PART=""; OPT_TIME=""; OPT_CPUS="$GW1B_DEFAULT_CPUS"; OPT_MEM="$GW1B_DEFAULT_MEM"
 OPT_NAME=""; OPT_CHAIN=1; OPT_AFTER=""; OPT_CPU=0; OPT_LOCAL_PORT=8888; OPT_ROOT=""; OPT_INFO=0; OPT_STOP=0; OPT_GPU_TEST=0
-OPT_CPUS_SET=0; OPT_MEM_SET=0
+OPT_CPUS_SET=0; OPT_MEM_SET=0; OPT_ONE_SOCKET=0
 parse_opts() {   # consumes known options, leaves the rest in REST
     REST=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --gpus|-g)        OPT_GPUS="$2"; shift 2 ;;
             --gpu-type|-G)    OPT_GPU_TYPE="$2"; shift 2 ;;
+            --one-socket)     OPT_ONE_SOCKET=1; shift ;;
             --nodes|-N)       OPT_NODES="$2"; shift 2 ;;
             --partition|-p)   OPT_PART="$2"; shift 2 ;;
             --time|-t)        OPT_TIME="$2"; shift 2 ;;
@@ -66,6 +69,7 @@ parse_opts() {   # consumes known options, leaves the rest in REST
 partition_for() {   # pick a sensible partition if none given
     if [[ -n "$OPT_PART" ]]; then echo "$OPT_PART"
     elif [[ "$OPT_CPU" == 1 ]]; then echo "$GW1B_PART_CPU"
+    elif [[ "${OPT_GPU_TYPE,,}" == gh200 || "${OPT_GPU_TYPE,,}" == superchip ]]; then echo "$GW1B_PART_GH200"
     else echo "$GW1B_DEFAULT_PARTITION"; fi
 }
 
@@ -80,15 +84,21 @@ gpu_type_for() {   # GRES type for --gres=gpu:<type>:N ; 'any' -> no type (Slurm
         a100|A100) t="$GW1B_GPU_A100" ;;
         l40s|L40S|l40) t="$GW1B_GPU_L40S" ;;
         rtx6000|blackwell|rtx) t="${GW1B_GPU_RTX6000:-rtx6000}" ;;
+        gh200|GH200|superchip|superChip) t="$GW1B_GPU_GH200" ;;
         any|ANY|"") t="" ;;
     esac
     echo "$t"
 }
 
-gres_flag() {   # --gres=gpu[:type]:N  (empty when no GPU requested)
+gres_flag() {   # --gres=gpu[:type]:N  (empty when no GPU requested); one line per flag
     [[ "$OPT_GPUS" -gt 0 ]] || return 0
     local t; t="$(gpu_type_for)"
-    echo "--gres=${GW1B_GRES}${t:+:$t}:${OPT_GPUS}"
+    if [[ "$OPT_ONE_SOCKET" == 1 ]]; then
+        # HPC's recipe for "half an A100 node": all GPUs from one CPU socket (two NVLink pairs, one NUMA domain)
+        echo "--sockets-per-node=1"; echo "--gpus-per-socket=${t:+$t:}${OPT_GPUS}"; echo "--gres-flags=enforce-binding"
+    else
+        echo "--gres=${GW1B_GRES}${t:+:$t}:${OPT_GPUS}"
+    fi
 }
 
 sbatch_common() {   # common sbatch flags -> printed one per line
@@ -221,7 +231,7 @@ cmd_shell() {
     parse_opts "$@"
     local part; part="$(partition_for)"
     local -a flags=("--partition=$part" "--cpus-per-task=$OPT_CPUS" "--mem=$OPT_MEM" "--time=${OPT_TIME:-$GW1B_DEFAULT_TIME}" "--job-name=gw1b-shell")
-    local g; g="$(gres_flag)"; [[ -n "$g" ]] && flags+=("$g")
+    local -a g; mapfile -t g < <(gres_flag); flags+=(${g[@]+"${g[@]}"})
     [[ -n "$GW1B_ACCOUNT" ]] && flags+=("--account=$GW1B_ACCOUNT")
     [[ -n "$GW1B_QOS" ]] && flags+=("--qos=$GW1B_QOS")
     info "requesting an interactive shell: partition $part, $OPT_GPUS x $(gpu_type_for) GPU(s), ${OPT_TIME:-$GW1B_DEFAULT_TIME} (type 'exit' to release it)"
@@ -233,6 +243,8 @@ cmd_status() {
     echo; echo "== GPU nodes in partition $GW1B_PART_GPU by GRES type and state (idle = free now) =="
     sinfo -N -h -p "$GW1B_PART_GPU" -o "%G %t" 2>/dev/null | awk '{n[$1" "$2]++} END {for (k in n) printf "  %4d nodes  %s\n", n[k], k}' | sort -k3,3 -k4,4 || true
     echo "   (request a type with --gpu-type v100|a100|l40s; default $GW1B_GPU_DEFAULT)"
+    echo; echo "== Grace Hopper nodes (partition $GW1B_PART_GH200, --gpu-type gh200, needs the arm64 image) =="
+    sinfo -N -h -p "$GW1B_PART_GH200" -o "%t" 2>/dev/null | sort | uniq -c | awk '{printf "  %4d nodes  %s\n", $1, $2}' || true
     echo; echo "== running Jupyter =="; cmd_jupyter --info
 }
 
@@ -298,6 +310,7 @@ case "$cmd" in
               args=()
               [[ "$OPT_GPUS" != "$GW1B_DEFAULT_GPUS" ]] && args+=(--gpus "$OPT_GPUS")
               [[ -n "$OPT_GPU_TYPE" ]] && args+=(--gpu-type "$OPT_GPU_TYPE")
+              [[ "$OPT_ONE_SOCKET" == 1 ]] && args+=(--one-socket)
               [[ "$OPT_NODES" != 1 ]] && args+=(--nodes "$OPT_NODES")
               [[ -n "$OPT_PART" ]] && args+=(--partition "$OPT_PART")
               [[ -n "$OPT_TIME" ]] && args+=(--time "$OPT_TIME")

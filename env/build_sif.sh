@@ -3,6 +3,7 @@
 #
 #   On Pegasus — no fakeroot there, so PULL the image GitHub Actions built from env/Dockerfile:
 #       env/build_sif.sh --from-image ghcr.io/vorhersager/gw1b-f2026:2026.09   # -> $GW1B_GROUP/sif/gw1b-<version>.sif
+#       env/build_sif.sh --arch arm64 --from-image ghcr.io/vorhersager/gw1b-f2026:2026.09-arm64   # GH200 nodes
 #     (`apptainer build x.sif docker://...` needs no privileges; it converts the OCI layers to a SIF.
 #      Publish the image first: GitHub -> Actions -> "build-image" -> Run workflow, or push a tag env-2026.09.)
 #   On a machine where `apptainer build --fakeroot` works:
@@ -16,9 +17,16 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/../gw1b.env"
 version="${GW1B_ENV_VERSION:-2026.09}"
-image=""
-if [[ "${1:-}" == "--from-image" ]]; then image="${2:?image name}"; shift 2; fi
-out="${1:-$GW1B_GROUP/sif/gw1b-$version.sif}"
+image=""; arch=""
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --from-image) image="${2:?image name}"; shift 2 ;;
+        --arch)       arch="${2:?amd64|arm64}"; shift 2 ;;       # arm64 = image for the GH200 (superChip) nodes
+        *) echo "unknown option $1" >&2; exit 1 ;;
+    esac
+done
+suffix=""; [[ "$arch" == arm64 ]] && suffix="-arm64"
+out="${1:-$GW1B_GROUP/sif/gw1b-$version$suffix.sif}"
 mkdir -p "$(dirname "$out")"
 
 ctr="$(command -v apptainer || command -v singularity || true)"
@@ -42,7 +50,7 @@ mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
 cd "$here"
 if [[ -n "$image" ]]; then
     echo "Pulling docker://$image -> $out with $ctr (cache: $APPTAINER_CACHEDIR; needs ~3x the image size free) ..."
-    "$ctr" build "$out" "docker://$image"
+    if [[ "$arch" == arm64 ]]; then "$ctr" build --arch arm64 "$out" "docker://$image"; else "$ctr" build "$out" "docker://$image"; fi
 else
     echo "Building $out from gw1b.def with $ctr (tmp: $APPTAINER_TMPDIR) ..."
     if "$ctr" build --fakeroot "$out" gw1b.def 2>/dev/null; then :
@@ -51,6 +59,6 @@ else
         "$ctr" build "$out" gw1b.def
     fi
 fi
-ln -sfn "$(basename "$out")" "$(dirname "$out")/gw1b.sif"
-echo "Done: $out  (symlink $(dirname "$out")/gw1b.sif)"
+ln -sfn "$(basename "$out")" "$(dirname "$out")/gw1b$suffix.sif"
+echo "Done: $out  (symlink $(dirname "$out")/gw1b$suffix.sif)"
 echo "Smoke test (on a GPU node):  apptainer exec --nv $out python -c 'import jax; print(jax.devices())'"

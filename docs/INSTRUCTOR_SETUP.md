@@ -7,16 +7,21 @@ tokenization (~2–3 h in Slurm jobs).
 
 ## Before you start: what HPC support has confirmed, and what is still open
 
-Confirmed on 2026-09-29 (details in [CLUSTER_FACTS.md](CLUSTER_FACTS.md)): the class Unix group `gw1b-class`, the
-group directory `/SEAS/groups/gw1b` and the scratch directory `/scratch/gw1b-class` (GPFS — **Lustre is gone**);
-one `gpu` partition for all GPU nodes with the GPU model chosen by GRES type (`--gres=gpu:a100:8`), 7-day wall time;
-`module load apptainer` (1.3.0) but **no fakeroot**, so the image is pulled from GHCR instead of built on Pegasus;
-drivers ≥ 570 everywhere (CUDA 12 wheels fine); compute nodes have internet; a Jupyter app exists and SSH tunnels work;
-Globus is available. Multi-day A100 reservations need a written proposal — plan for shared, flexible jobs.
+Confirmed by HPC staff 9/28–10/1 (details in [CLUSTER_FACTS.md](CLUSTER_FACTS.md)): the class Unix group `gw1b-class`
+(your account is in it since 10/1), the group directory `/SEAS/groups/gw1b` (HPC may move the class to their new
+"Research NAS" layout — use the path they send) and the scratch directory `/scratch/gw1b-class` (GPFS — **Lustre is
+gone**; purges are age-based and announced); one `gpu` partition for all GPU nodes with the GPU model chosen by GRES
+type (`--gres=gpu:a100:8`), 7-day wall time, **no `--account`, no QOS, no per-user limits, no preemption**; `module
+load apptainer` (1.3.0) but **no fakeroot**, so the image is pulled from GHCR instead of built on Pegasus; drivers ≥ 570
+everywhere (CUDA 12 wheels fine); compute nodes have internet; Open OnDemand (ood.arc.gwu.edu) has a Jupyter app that
+reads `~/.local/share/jupyter/kernels`, and SSH tunnels work; InfiniBand (`ib0`/`mlx5_0`) between the GPU nodes; Globus
+is available. Reservations: single-day only (a class reservation for the Friday labs is under review); for the final
+run plan on shared, flexible jobs — and look at the Grace Hopper nodes, which HPC says are the least contended.
 
-Still to get from HPC support: quotas and purge policy for scratch and group storage; whether `--account`/`--qos`
-are needed and the per-user limits; the exact GRES type names (`sinfo -o "%N %G"` shows them — `gw1b-admin discover`
-reads them); interface names for 2-node NCCL jobs; and, first of all, **student accounts before the Friday 10/2 lab**.
+**Student accounts** are created one at a time from each student's HPC Access Request form (with their SSH public
+key); a third of the class had applied by 10/1. Push everyone to apply now, and schedule HPC's onboarding session
+before the first Pegasus lab (10/17). ONBOARDING.md (written by `gw1b-admin students`) tells them exactly what to do,
+including the 2FA setup at first login.
 
 Publish the container image once before running the setup: GitHub → Actions → **build-image** → Run workflow
 (or push a tag `env-2026.09`), then make the package public (profile → Packages → gw1b-f2026 → Package settings →
@@ -75,15 +80,18 @@ HPC staff also offered to build containers on request (send them `env/gw1b.def`)
 * **Proxy experiments** (50M–350M, 1–7B tokens): `gw1b train --config configs/100m.yaml --set run.name=…`.
   V100 (default): `--set model.dtype=float32` (no bf16 tensor cores); `--gpu-type a100|l40s`: bf16 by default.
   Everyone runs `gw1b budget` before submitting.
-* **The GW-1B run**: `gw1b train --gpus 8 --gpu-type a100 --time 2-00:00:00 --chain 3 --config configs/gw1b_1p15b.yaml`.
-  Chained jobs resume from the last Orbax checkpoint (every 500 steps ≈ 0.5B tokens ≈ 40 min on 8 A100s), so the
-  run can also continue on 4 GPUs (`--gpus 4 --set optim.grad_accum=2`, same global batch) when a full node is not
-  free — HPC's advice is exactly that: flexible jobs instead of reservations. Two nodes: `--nodes 2`. Expect ~55 h
-  per 20B tokens on 8 A100s at 35 % MFU (106 h on 4); 100B tokens is ~11 days on one node — see
-  [CLUSTER_FACTS.md](CLUSTER_FACTS.md) before promising 100B tokens.
-* **Scratch**: `/scratch/gw1b-class` is not backed up and its purge policy is still unanswered — treat it as
-  volatile. Milestone checkpoints (`ckpt_keep_every`) and the release go to `$GW1B_GROUP/release/` (a 1.15B bf16
-  checkpoint is 2.3 GB; with optimizer state 14 GB; ask for the group quota).
+* **The GW-1B run**: `gw1b train --gpus 8 --gpu-type a100 --time 1-00:00:00 --chain 4 --config configs/gw1b_1p15b.yaml`.
+  Chained 1-day jobs (HPC: 8-GPU jobs dequeued within 2 days in September; longer requests wait longer) resume from
+  the last Orbax checkpoint (every 500 steps ≈ 0.5B tokens ≈ 40 min on 8 A100s), so the run can also continue on
+  half a node when a full one is not free: `gw1b train --gpus 4 --gpu-type a100 --one-socket --set optim.grad_accum=2
+  …` (same global batch; `--one-socket` = HPC's recipe for the four GPUs of one CPU socket). Expect ~55 h per 20B
+  tokens on 8 A100s at 35 % MFU, 106 h on 4. Alternatives: one Grace Hopper node (`--gpu-type gh200`, ~5.5 days per
+  20B tokens, least contended, needs the arm64 image) or a 4-GPU Blackwell node once online. 100B tokens is ~11
+  A100-node-days — see [CLUSTER_FACTS.md](CLUSTER_FACTS.md) before promising it. There is no QOS or priority boost on
+  Pegasus; a written proposal for a partial reservation can be submitted but HPC prefers standard scheduling.
+* **Scratch**: `/scratch/gw1b-class` is not backed up; purges are age-based, announced in advance, with exceptions on
+  request — still, milestone checkpoints (`ckpt_keep_every`) and the release go to `$GW1B_GROUP/release/` (a 1.15B
+  bf16 checkpoint is 2.3 GB; with optimizer state 14 GB; the group quota is shared school-wide and not a concern).
 * **Updating the environment** mid-semester: edit `env/requirements.in` → `env/lock.sh` → bump `GW1B_ENV_VERSION`
   in `gw1b.env` and `env/gw1b.def` → `gw1b-admin build --force`. The new `.sif` lands next to the old one and the
   `gw1b.sif` symlink moves; running jobs keep the old image. `gw1b-admin test` afterwards.

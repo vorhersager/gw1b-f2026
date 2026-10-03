@@ -17,7 +17,8 @@ GPU_PEAK_TFLOPS = {
     "a100": (312.0, 19.5, 80, 2.0),        # Pegasus gpu050/gpu051: 8x A100-80GB PCIe, --gpu-type a100
     "l40s": (362.0, 91.6, 48, 1.5),        # Pegasus L40S nodes, --gpu-type l40s
     "rtx6000": (500.0, 120.0, 96, 2.5),    # RTX PRO 6000 Blackwell 96GB nodes (Oct 2026): 1 PFLOP/s FP16 sparse spec -> ~500 dense; measure!
-    "h100": (989.0, 67.0, 96, 3.5),        # Pegasus Grace Hopper nodes (H100 96GB) - ARM host!
+    "h100": (989.0, 67.0, 96, 3.5),        # Pegasus Grace Hopper nodes (H100 96GB, superChip partition, 1 per node) - ARM host!
+    "gh200": (989.0, 67.0, 96, 3.5),       # alias of h100: --gpu-type gh200
     "v6e":  (918.0, 918.0, 32, 2.7),       # TPU Trillium chip (design-doc reference)
 }
 

@@ -176,6 +176,12 @@ cmd_discover() {
             [[ -n "${!var}" ]] && warn "$var='${!var}' is not a GRES type on $GW1B_PART_GPU (nodes may be offline, or the name differs — check 'sinfo -o %G')" || info "$var: none yet (optional)"
         fi
     done
+    # Grace Hopper partition: GRES type (if any) for --gpu-type gh200
+    if [[ " $parts " == *" $GW1B_PART_GH200 "* ]]; then
+        local ghg; ghg="$(sinfo -N -h -p "$GW1B_PART_GH200" -o '%G' 2>/dev/null | tr ',' '\n' | grep -i '^gpu:' | cut -d: -f2 | grep -iE 'gh200|h100|hopper' | sort -u | head -1 || true)"
+        if [[ -n "$ghg" ]]; then env_set GW1B_GPU_GH200 "$ghg"; ok "Grace Hopper partition $GW1B_PART_GH200: GRES type '$ghg' (needs the arm64 image, see docs/CLUSTER_FACTS.md)"
+        else ok "Grace Hopper partition $GW1B_PART_GH200 exists (untyped GRES; needs the arm64 image)"; fi
+    else info "no '$GW1B_PART_GH200' partition (GH200 nodes) visible"; fi
     load_env
     local maxt; maxt="$(sinfo -h -p "$GW1B_PART_GPU" -o '%l' 2>/dev/null | head -1)"
     if [[ -n "$maxt" && "$maxt" != "infinite" && "$maxt" != "UNLIMITED" ]]; then env_set GW1B_MAX_TIME "$maxt"; ok "wall-time limit of $GW1B_PART_GPU: $maxt -> GW1B_MAX_TIME"
@@ -274,6 +280,13 @@ cmd_build() {
         fi
         chgrp "$GW1B_UNIX_GROUP" "$GW1B_GROUP"/sif/* 2>/dev/null; chmod g+r "$GW1B_GROUP"/sif/* 2>/dev/null
         ok "container ready: $GW1B_SIF"
+    elif [[ "$mode" == arm64 ]]; then
+        [[ -n "${GW1B_IMAGE_ARM64:-}" ]] || die "set GW1B_IMAGE_ARM64 in gw1b.env (run the build-image workflow with arm64=true first)"
+        if [[ -e "$GW1B_SIF_ARM64" && "$FORCE" != 1 ]]; then ok "arm64 container exists: $GW1B_SIF_ARM64 (use --force to rebuild)"; return; fi
+        info "pulling the aarch64 image docker://$GW1B_IMAGE_ARM64 for the Grace Hopper (superChip) nodes"
+        "$THIS_HOME/env/build_sif.sh" --arch arm64 --from-image "$GW1B_IMAGE_ARM64" || { warn "arm64 pull failed"; return 1; }
+        chgrp "$GW1B_UNIX_GROUP" "$GW1B_GROUP"/sif/* 2>/dev/null; chmod g+r "$GW1B_GROUP"/sif/* 2>/dev/null
+        ok "arm64 container ready: $GW1B_SIF_ARM64 — test with:  gw1b doctor --gpu --gpu-type gh200"
     else
         if [[ -x "$GW1B_VENV/bin/python" && "$FORCE" != 1 ]]; then ok "venv exists: $GW1B_VENV (use --force to rebuild)"; return; fi
         info "building the shared venv with uv (~5 min, needs internet)"
@@ -369,7 +382,13 @@ cmd_students() {
     cat > "$THIS_HOME/ONBOARDING.md" <<EOF
 # GW1B on Pegasus — getting started (send this to the students)
 
-You need: a Pegasus account (requested for the class), the GW VPN when off campus, and a terminal.
+You need: (1) a Pegasus account — submit the **HPC Access Request form** with your **SSH public key**
+(\`ssh-keygen -t ed25519\` on your laptop, then paste the contents of \`~/.ssh/id_ed25519.pub\`); accounts are created one
+by one, so do this today; (2) the GW network or **GW VPN** when off campus; (3) at your first login, the single-use
+code HPC emails you (subject "HPC Pegasus 2FA") — then **set up 2FA immediately** (https://github.com/gwuniversity/hpc-onboarding,
+"00 First Steps / 02 Initial Login + 2FA Setup") or you will be locked out; (4) a terminal.
+Every new ssh connection asks for the 2FA code; the laptop script below reuses one connection for the tunnel.
+HPC office hours (Zoom, Tue/Thu 12:30–14:30): https://gwu-edu.zoom.us/j/91295945575 · tickets: hpchelp@gwu.edu
 
 ## One-time setup (5 minutes)
 \`\`\`bash
@@ -385,6 +404,8 @@ gw1b jupyter        # waits for a V100, then prints the ssh-tunnel line and the 
 \`\`\`
 Run the printed \`ssh -N -L …\` line in a terminal **on your laptop**, then open the URL — or in Colab:
 *Connect ▾ → Connect to a local runtime* and paste the URL. Start with \`~/gw1b/notebooks/00_hello_pegasus.ipynb\`.
+No terminal? The Open OnDemand portal $GW1B_OOD_URL has a *Jupyter Notebook Pegasus* app: run \`gw1b kernel\` once on the
+login node, then pick the **GW1B (JAX)** kernel in the app (review every field before Launch).
 
 One command from the laptop instead: \`laptop/gw1b-connect.sh <netid>\` (macOS/Linux) or
 \`laptop\\gw1b-connect.ps1 <netid>\` (Windows) — both are in $GW1B_HOME/laptop and in the class repo.
@@ -436,7 +457,7 @@ case "$cmd" in
     all) cmd_all ;;
     init) cmd_init ;;
     discover) cmd_discover ;;
-    build) cmd_build "${1:-auto}" ;;
+    build) cmd_build "${1:-auto}" ;;   # auto | sif | venv | arm64
     test) cmd_test ;;
     data) cmd_data ;;
     students) cmd_students ;;

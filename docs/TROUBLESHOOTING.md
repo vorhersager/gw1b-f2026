@@ -6,6 +6,14 @@
 `apptainer` is not available. Instructor: `env/build_sif.sh` or `env/build_venv.sh`; if apptainer is a module, set
 `GW1B_APPTAINER_MODULE` in `gw1b.env`.
 
+**`Permission denied (publickey)` when you ssh** — your SSH public key is not on your Pegasus account yet (it is
+registered through the HPC Access Request form), or ssh is offering a different key: `ssh -i ~/.ssh/id_ed25519 …`.
+Password login does not exist.
+
+**`Verification code:` prompt** — that is Pegasus 2FA. The first time, use the single-use code HPC emailed you
+("HPC Pegasus 2FA") and set up the authenticator immediately; afterwards every new ssh connection asks for the
+6-digit code. The laptop script opens one connection and reuses it for the tunnel, so you type it once.
+
 **`sbatch: error: invalid partition` / `Invalid generic resource` / `Invalid account`** — the `VERIFY` lines in `gw1b.env` (`GW1B_PART_*`, `GW1B_GPU_*`,
 `GW1B_ACCOUNT`, `GW1B_GRES`). Run `bash slurm/discover_cluster.sh`.
 

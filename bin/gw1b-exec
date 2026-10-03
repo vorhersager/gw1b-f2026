@@ -17,6 +17,15 @@ _load_module_system() {
 _container_cmd() { command -v apptainer 2>/dev/null || command -v singularity 2>/dev/null || true; }
 
 runtime="$GW1B_RUNTIME"
+sif="$GW1B_SIF"
+if [[ "$(uname -m)" == "aarch64" ]]; then   # Grace Hopper nodes: the x86 image cannot run here
+    sif="${GW1B_SIF_ARM64:-}"
+    if [[ ! -e "$sif" ]]; then
+        echo "gw1b-exec: this is an aarch64 node (GH200) and no arm64 image exists at ${sif:-GW1B_SIF_ARM64}." >&2
+        echo "           Instructor: build it with the build-image workflow (arm64 input) and 'gw1b-admin build arm64'." >&2
+        exit 1
+    fi
+fi
 ctr="$(_container_cmd)"
 if [[ "$runtime" != "venv" && -z "$ctr" ]]; then
     _load_module_system
@@ -24,10 +33,10 @@ if [[ "$runtime" != "venv" && -z "$ctr" ]]; then
     ctr="$(_container_cmd)"
 fi
 if [[ "$runtime" == "auto" ]]; then
-    if [[ -n "$ctr" && -e "$GW1B_SIF" ]]; then runtime=sif
+    if [[ -n "$ctr" && -e "$sif" ]]; then runtime=sif
     elif [[ -x "$GW1B_VENV/bin/python" ]]; then runtime=venv
     else
-        echo "gw1b-exec: no environment found. Expected container $GW1B_SIF (needs apptainer/singularity)" >&2
+        echo "gw1b-exec: no environment found. Expected container $sif (needs apptainer/singularity)" >&2
         echo "           or venv $GW1B_VENV. Instructor: run env/build_sif.sh or env/build_venv.sh." >&2
         exit 1
     fi
@@ -48,7 +57,7 @@ if [[ "$runtime" == "sif" ]]; then
     [[ -n "${SLURM_TMPDIR:-}" && -d "${SLURM_TMPDIR:-}" ]] && binds="$binds,$SLURM_TMPDIR"
     nv="--nv"
     command -v nvidia-smi >/dev/null 2>&1 || nv=""   # login/CPU nodes: no GPU driver to bind
-    exec "$ctr" exec $nv --bind "$binds" --pwd "$PWD" "$GW1B_SIF" "$@"
+    exec "$ctr" exec $nv --bind "$binds" --pwd "$PWD" "$sif" "$@"
 else
     export PATH="$GW1B_VENV/bin:$PATH"
     export VIRTUAL_ENV="$GW1B_VENV"

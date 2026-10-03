@@ -5,16 +5,21 @@ JupyterLab in your browser, from Google Colab, or as batch jobs.
 
 ## 1. First time (5 minutes)
 
-1. Get a Pegasus account (your instructor requested it) and, if you are off campus, connect to the GW VPN.
-2. `ssh <netid>@pegasus.arc.gwu.edu` (GW password; 2FA if enabled on your account).
-3. Run once:
-   ```bash
-   source /SEAS/groups/gw1b/gw1b-f2026/activate.sh     # path from your instructor
-   gw1b setup        # adds the environment to ~/.bashrc, creates your folders, copies notebooks to ~/gw1b
-   gw1b doctor       # all lines [ok]?
-   ```
-4. Optional but recommended: put your laptop's ssh public key in `~/.ssh/authorized_keys` on Pegasus so you
-   are not asked for a password on every tunnel (`ssh-copy-id <netid>@pegasus.arc.gwu.edu`).
+Before anything else you need a Pegasus account, and HPC creates them one at a time from your **HPC Access Request
+form**, which needs your **SSH public key**: on your laptop run `ssh-keygen -t ed25519` (press Enter at the prompts),
+then paste the contents of `~/.ssh/id_ed25519.pub` into the form. When the account email arrives, log in once with the
+single-use code HPC sends ("HPC Pegasus 2FA") and **set up 2FA immediately** (step "02 Initial Login + 2FA Setup" at
+https://github.com/gwuniversity/hpc-onboarding) — without it you cannot log in a second time. Off campus, connect to
+the GW VPN first. Every new ssh connection asks for your 2FA code.
+
+```bash
+ssh <netid>@pegasus.arc.gwu.edu
+source /SEAS/groups/gw1b/gw1b-f2026/activate.sh      # the path your instructor gave you
+gw1b setup           # once: adds the line above to ~/.bashrc, creates your scratch folders, copies the notebooks to ~/gw1b
+gw1b doctor          # every line [ok]?
+gw1b kernel          # once: makes the environment selectable in the Open OnDemand Jupyter app
+```
+Help from HPC: Zoom office hours Tue/Thu 12:30–14:30 (https://gwu-edu.zoom.us/j/91295945575) or hpchelp@gwu.edu.
 
 ## 2. Every day: a GPU JupyterLab
 
@@ -46,9 +51,9 @@ Useful:
 
 ### Two ways to get a notebook on a GPU node
 
-| | `gw1b jupyter` + ssh tunnel | Pegasus Jupyter app (web portal) |
+| | `gw1b jupyter` + ssh tunnel | Open OnDemand Jupyter app (https://ood.arc.gwu.edu) |
 |---|---|---|
-| start | `gw1b jupyter` on the login node, then the printed `ssh -N -L …` on your laptop | portal → Jupyter app → pick GPU/time → launch |
+| start | `gw1b jupyter` on the login node, then the printed `ssh -N -L …` on your laptop (the laptop script does both with one 2FA prompt) | portal → *Jupyter Notebook Pegasus* → pick partition `gpu`, GPU type, time → review every field → Launch |
 | notebook UI | JupyterLab in your browser **or Google Colab** (*Connect to a local runtime*) | classic Jupyter in the portal |
 | the GW1B environment | automatic | run `gw1b kernel` once; then select the **GW1B (JAX)** kernel — the app reads `~/.local/share/jupyter/kernels` |
 | good for | Colab users, TensorBoard (port 6006 is in the tunnel) | no ssh, no tunnel |
@@ -71,7 +76,10 @@ gw1b cancel <jobid>
   For runs longer than a limit submit a chain: `--chain 4` queues four dependent jobs.
 * **Which GPUs**: Pegasus has one `gpu` partition; the model is chosen with `--gpu-type v100|a100|l40s` (default
   V100; `--gpus 5–8` implies A100). V100s have no bf16 → add `--set model.dtype=float32`. `gw1b status` shows how
-  many nodes of each type are idle right now.
+  many nodes of each type are idle right now. There are no per-user limits and no QOS: priority is fair-share, so
+  ask for what you need and no more — 1–2-GPU jobs start fastest, and nothing is ever preempted once it runs.
+* **Wall time**: the `gpu` partition allows 7 days, but short jobs start sooner; for anything over a day use
+  `--time 1-00:00:00 --chain N` and let the checkpoint/resume logic do the rest.
 * Interactive shell on a GPU node (for debugging): `gw1b shell --gpus 1 --time 1:00:00`.
 
 ## 4. Where files live
