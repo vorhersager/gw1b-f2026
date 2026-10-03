@@ -54,7 +54,7 @@ gw1b jupyter --gpus 2 --time 3:00:00              # 2 V100s; --gpu-type a100 for
 When the job starts it prints:
 ```
   1) On YOUR LAPTOP, in a new terminal (keep it open):
-       ssh -N -L 8888:gpu017:8891 -L 6006:gpu017:6006 <netid>@pegasus.arc.gwu.edu
+       ssh -N -L 8888:gpu017:8891 -L 6006:gpu017:6006 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 <netid>@pegasus.arc.gwu.edu
   2) JupyterLab:   http://localhost:8888/lab?token=…
      Colab:        Connect ▾ -> "Connect to a local runtime" -> http://localhost:8888/?token=…
   3) Finished?     gw1b cancel 123456

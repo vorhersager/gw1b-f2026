@@ -15,14 +15,14 @@ LOCAL_PORT="${GW1B_LOCAL_PORT:-8888}"
 [[ $# -ge 1 ]] || { echo "usage: $0 <netid> [gw1b jupyter options]"; exit 1; }
 netid="$1"; shift
 # Reuse one ssh connection for both steps (one password/2FA prompt instead of two)
-ctl=(-o ControlMaster=auto -o "ControlPath=$HOME/.ssh/gw1b-%r@%h:%p" -o ControlPersist=15m -o ServerAliveInterval=60)
+ctl=(-o ControlMaster=auto -o "ControlPath=$HOME/.ssh/gw1b-%r@%h:%p" -o ControlPersist=15m -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes)
 mkdir -p "$HOME/.ssh"
 
 echo "[gw1b] connecting to $LOGIN_HOST as $netid ..."
 out="$(ssh -tt "${ctl[@]}" "$netid@$LOGIN_HOST" \
       "bash -lc 'source $GW1B_HOME_REMOTE/activate.sh >/dev/null 2>&1; gw1b jupyter --local-port $LOCAL_PORT $*'" | tr -d '\r')" || true
 echo "$out"
-read -r fwd1 fwd2 target <<< "$(printf '%s\n' "$out" | sed -n 's/.*ssh -N -L \([^ ]*\) -L \([^ ]*\) \([^ ]*\).*/\1 \2 \3/p' | head -1)"
+read -r fwd1 fwd2 target <<< "$(printf '%s\n' "$out" | sed -n 's/.*ssh -N -L \([^ ]*\) -L \([^ ]*\).* \([^ ]*@[^ ]*\).*/\1 \2 \3/p' | head -1)"
 [[ -n "${target:-}" ]] || { echo "[gw1b] could not find the tunnel command in the output above"; exit 1; }
 url="$(printf '%s\n' "$out" | grep -m1 -oE 'http://localhost:[0-9]+/lab\?token=[a-f0-9]+' || true)"
 

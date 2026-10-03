@@ -74,6 +74,14 @@ port is *answering*. If it stays refused: `tail -n 30 $GW1B_SCRATCH/users/$USER/
 JupyterLab error there (port in use, unwritable `~/.jupyter`, …) means the job died; `gw1b cancel <jobid>` and start again.
 The tunnel itself can stay open; just reload the browser tab / click Connect again once the port answers.
 
+**Server running, tunnel open, browser still cannot connect** — nine times out of ten an *older* tunnel window is still
+open on the laptop: it owns local port 8888 and forwards to the previous job's node/port, and a second `ssh -N -L 8888:…`
+then prints `bind: Address already in use` / `cannot listen to port: 8888` (with `-o ExitOnForwardFailure=yes` it exits).
+Close every tunnel window, run `gw1b jupyter --info` on Pegasus, start the printed line in a fresh laptop terminal, and
+open the printed URL (its token belongs to the current job). `http://127.0.0.1:8888/lab?token=…` works where `localhost`
+resolves oddly. Quick checks: on the laptop `curl -sI http://127.0.0.1:8888/lab | head -1` (an `HTTP/1.1 …` line = the
+tunnel works, the problem is the URL/token/browser); on the login node `gw1b jupyter --info` says *answering*.
+
 **Colab: "Unable to connect to the runtime"** — see [COLAB.md](COLAB.md): the tunnel terminal must stay open; paste the
 URL with the token; try the JupyterLab URL in a browser tab first.
 

@@ -217,7 +217,8 @@ print_jupyter_info() {
   Jupyter job $1 is RUNNING on $node (GPU node), JupyterLab on port $port is $reach.  Time limit: $(squeue -j "$1" -h -o %L) left.
 
   1) On YOUR LAPTOP, in a new terminal (keep it open):
-       ssh -N -L $lport:$node:$port -L 6006:$node:6006 $USER@$GW1B_LOGIN_HOST
+       ssh -N -L $lport:$node:$port -L 6006:$node:6006 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 $USER@$GW1B_LOGIN_HOST
+     (an older tunnel still open on your laptop blocks port $lport: close it first — with these options ssh says so and exits)
 
   2) JupyterLab:   http://localhost:$lport/lab?token=$token
      Colab:        Connect ▾ -> "Connect to a local runtime" -> http://localhost:$lport/?token=$token

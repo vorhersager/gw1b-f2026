@@ -8,7 +8,8 @@ notebooks) while every computation, file and checkpoint stays on Pegasus.
 
 1. On Pegasus: `gw1b jupyter` (or from the laptop: `laptop/gw1b-connect.sh <netid>`). Wait for the connection lines.
 2. On your laptop: run the printed tunnel command and keep that terminal open:
-   `ssh -N -L 8888:<node>:<port> -L 6006:<node>:6006 <netid>@pegasus.arc.gwu.edu`
+   `ssh -N -L 8888:<node>:<port> -L 6006:<node>:6006 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 <netid>@pegasus.arc.gwu.edu`
+   (copy it from `gw1b jupyter --info`: the node and port change with every job; close older tunnel windows first)
 3. In Colab: **Connect ▾ → Connect to a local runtime**, paste `http://localhost:8888/?token=<token>` (printed by
    `gw1b jupyter`), click **Connect**. The status bar shows the connection; `!hostname` prints the GPU node name.
 
