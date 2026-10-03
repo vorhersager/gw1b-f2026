@@ -3,6 +3,8 @@
 You never install anything. Every team uses the same environment on Pegasus; you reach it from
 JupyterLab in your browser, from Google Colab, or as batch jobs.
 
+New to GPUs, Slurm or JAX? Read [PRIMER.md](PRIMER.md) first — it explains every name used below.
+
 ## 1. First time (5 minutes)
 
 Before anything else you need a Pegasus account, and HPC creates them one at a time from your **HPC Access Request
