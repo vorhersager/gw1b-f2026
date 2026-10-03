@@ -19,10 +19,18 @@ Password login does not exist.
 `gw1b.env` now sources first), restore the tracked file, and pull:
 ```bash
 git diff -U0 gw1b.env | grep '^+export' | sed 's/^+//' > gw1b.local.env   # keep what init/discover wrote
-git checkout -- gw1b.env && git pull && cat gw1b.local.env
+git checkout -- gw1b.env && git pull
+gw1b-admin status      # rewrites the copied lines as plain values and shows what is set
 ```
 From now on init/discover write `gw1b.local.env` only (and `gw1b-admin` does this migration itself when it finds an
 edited `gw1b.env`), so pulls stay clean. `gw1b-admin students` likewise writes to `onboarding/` instead of `laptop/`.
+
+**`gw1b doctor` shows the shipped defaults (`group dir /SEAS/groups/gw1b`, `no container image at /SEAS/groups/gw1b/sif/…`)**
+— its first line says which files it read. `gw1b.env only — no gw1b.local.env` means the site values are missing: the
+instructor runs `gw1b-admin init` (and `discover`). If `gw1b.local.env` is listed but the values are still the defaults,
+it holds `export KEY="${KEY:-…}"` lines (copied by hand) and a stale value exported by an earlier `source activate.sh`
+in the same shell won: `gw1b-admin status` rewrites the file as plain `export KEY="…"` lines, after which every shell
+picks the site values up again.
 
 **`sbatch: error: invalid partition` / `Invalid generic resource` / `Invalid account`** — the `VERIFY` values (`GW1B_PART_*`, `GW1B_GPU_*`,
 `GW1B_ACCOUNT`, `GW1B_GRES`) are wrong for this cluster. Run `gw1b-admin discover` (writes `gw1b.local.env`) or set them there by hand.

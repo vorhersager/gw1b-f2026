@@ -50,16 +50,16 @@ ask() {  # ask VAR "prompt" default
 }
 confirm() { [[ "$YES" == 1 ]] && return 0; local r; read -r -p "  $1 [Y/n]: " r; [[ -z "$r" || "$r" =~ ^[Yy] ]]; }
 
-env_set() {  # env_set KEY VALUE  -> records   export KEY="${KEY:-value}"   in gw1b.local.env (wins over gw1b.env)
+env_set() {  # env_set KEY VALUE  -> records   export KEY="value"   in gw1b.local.env (wins over gw1b.env and over stale shell values)
     local key="$1" value="$2"
     if [[ ! -f "$LOCAL_ENV" ]]; then
         printf '# Site-specific GW1B values, written by `gw1b-admin init` / `discover` on %s (%s). Edit freely.\n' "$(hostname -s)" "$(date +%F)" > "$LOCAL_ENV"
         printf '# gw1b.env sources this file first, so these win over its defaults; git ignores it, so `git pull` never conflicts.\n' >> "$LOCAL_ENV"
     fi
     if grep -q "^export $key=" "$LOCAL_ENV"; then
-        sed -i "s|^export $key=.*|export $key=\"\${$key:-$value}\"|" "$LOCAL_ENV"
+        sed -i "s|^export $key=.*|export $key=\"$value\"|" "$LOCAL_ENV"
     else
-        printf 'export %s="${%s:-%s}"\n' "$key" "$key" "$value" >> "$LOCAL_ENV"
+        printf 'export %s="%s"\n' "$key" "$value" >> "$LOCAL_ENV"
     fi
     export "$key=$value"
 }
@@ -76,7 +76,16 @@ migrate_env() {  # until 2026-10-03 init/discover edited gw1b.env itself; move s
     done < <(git -C "$THIS_HOME" diff -U0 -- gw1b.env | grep '^+export ' | sed 's/^+//')
     git -C "$THIS_HOME" checkout -- gw1b.env 2>/dev/null && ok "$n value(s) moved to $LOCAL_ENV; gw1b.env is back to the repository version"
 }
-load_env() { migrate_env; set -a; source "$ENV_FILE"; set +a; }
+normalize_local_env() {  # lines copied by hand as  export KEY="${KEY:-value}"  would lose against a stale shell value: make them plain
+    [[ -f "$LOCAL_ENV" ]] || return 0
+    grep -q '^export [A-Za-z0-9_]*="\${' "$LOCAL_ENV" 2>/dev/null || return 0
+    local line
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^export\ ([A-Za-z0-9_]+)=\"\$\{[A-Za-z0-9_]+:-([^}]*)\}\" ]]; then env_set "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"; fi
+    done < <(grep '^export [A-Za-z0-9_]*="\${' "$LOCAL_ENV")
+    info "gw1b.local.env: rewrote \${KEY:-value} lines as plain values"
+}
+load_env() { migrate_env; normalize_local_env; set -a; source "$ENV_FILE"; set +a; }
 load_module_system() {
     if ! command -v module >/dev/null 2>&1; then
         [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh 2>/dev/null
