@@ -45,6 +45,12 @@ def peak_flops(device_kind: str, dtype: str = "bfloat16") -> float | None:
     return tc * 1e12
 
 
+def gpu_hour_price(device_kind: str, default: float = 2.0) -> float:
+    """Notional public-cloud on-demand $/GPU-hour for a device kind (the table above), `default` if unknown."""
+    key = gpu_key(device_kind)
+    return default if key is None else GPU_PEAK_TFLOPS[key][3]
+
+
 def gpu_memory_bytes(device_kind: str) -> float | None:
     """Total memory of a GPU from the table (fallback when JAX cannot report it)."""
     key = gpu_key(device_kind)
@@ -156,6 +162,7 @@ def main(argv=None):
     ap.add_argument("--n-gpus", type=int, default=8)
     ap.add_argument("--mfu", type=float, default=0.35, help="assumed model FLOPs utilisation (0.25-0.45 typical)")
     ap.add_argument("--dtype", default="bfloat16")
+    ap.add_argument("--price", type=float, default=None, help="$/GPU-hour (default: the GPU's notional on-demand price)")
     a = ap.parse_args(argv)
     kw = {}
     if a.config:
@@ -169,7 +176,7 @@ def main(argv=None):
         if not n:
             ap.error("give --config or --params")
     for gpus in sorted({a.n_gpus, 1, 4, 8, 16}):
-        print(format_estimate(estimate(n, a.tokens, a.gpu, gpus, a.mfu, a.dtype, **kw)))
+        print(format_estimate(estimate(n, a.tokens, a.gpu, gpus, a.mfu, a.dtype, price_per_gpu_hour=a.price, **kw)))
         print()
 
 

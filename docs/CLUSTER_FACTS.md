@@ -90,5 +90,7 @@ Reading of the table:
 
 ### Cloud-equivalent dollars
 
-`run.gpu_hour_price_usd` (default $2/GPU-hour, roughly an on-demand A100) turns GPU-hours into the "$" every
-experiment reports, so students can compare against the $10,000 framing even though Pegasus time is not billed.
+The "$" every experiment reports is GPU-hours × a notional public-cloud on-demand price per GPU type (V100 $1,
+A100 $2, L40S $1.5, RTX 6000 $2.5, H100/GH200 $3.5 per GPU-hour; `run.gpu_hour_price_usd` overrides it), so
+students can compare against the $10,000 framing even though Pegasus time is not billed. GPU-hours = wall-clock
+time inside the training loop × GPUs in the job (queue time excluded; resumed runs carry their hours over).

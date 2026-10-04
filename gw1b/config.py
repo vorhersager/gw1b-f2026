@@ -116,7 +116,8 @@ class RunConfig:
     profile: bool = False        # write a JAX profiler trace for the first steps
     wandb: bool = False          # log to Weights & Biases (needs WANDB_API_KEY; use WANDB_MODE=offline on compute nodes)
     tensorboard: bool = True
-    gpu_hour_price_usd: float = 2.0  # notional $/GPU-hour so every run reports a dollar cost
+    gpu_hour_price_usd: float | None = None  # notional $/GPU-hour for the "$" every run reports; None = by GPU type
+                                            # (budget.GPU_PEAK_TFLOPS: V100 $1, A100 $2, L40S $1.5, RTX 6000 $2.5, H100 $3.5)
 
 
 @dataclass(frozen=True)

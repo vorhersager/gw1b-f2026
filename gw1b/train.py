@@ -31,7 +31,7 @@ import optax
 from flax import nnx
 
 from . import checkpoint as ckpt_lib
-from .budget import choose_micro_batch, flops_per_token, peak_flops
+from .budget import choose_micro_batch, flops_per_token, gpu_hour_price, peak_flops
 from .config import OptimConfig, TrainConfig, config_summary, load_config, save_config
 from .data import BatchLoader, TokenDataset
 from .model import count_params, cross_entropy
@@ -238,6 +238,11 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
     # ---- throughput accounting --------------------------------------------
     fpt = flops_per_token(n_params, cfg.model.n_layers, cfg.data.seq_len, cfg.model.d_model)
     peak = peak_flops(jax.devices()[0].device_kind, cfg.model.dtype)
+    price = cfg.run.gpu_hour_price_usd if cfg.run.gpu_hour_price_usd is not None else gpu_hour_price(jax.devices()[0].device_kind)
+    if is_main:
+        print(f"[train] cost basis: ${price:.2f} per GPU-hour x {n_devices} device(s) "
+              f"({'run.gpu_hour_price_usd' if cfg.run.gpu_hour_price_usd is not None else 'notional on-demand price of ' + jax.devices()[0].device_kind}); "
+              f"GPU-hours = wall-clock in the training loop x devices, resumed runs carry theirs over")
     logger = MetricsLogger(run_dir, cfg, enabled=is_main)
 
     # ---- loop --------------------------------------------------------------
@@ -274,14 +279,14 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
                 metrics = {"train/loss": last_loss, "train/ppl": math.exp(min(last_loss, 20)), "train/lr": lr,
                            "train/grad_norm": gnorm_v, "tokens_seen": tokens_seen,
                            "perf/tokens_per_s": tps, "perf/mfu": mfu, "perf/step_time_s": dt / cfg.run.log_every,
-                           "cost/gpu_hours": gpu_hours, "cost/usd": gpu_hours * cfg.run.gpu_hour_price_usd,
+                           "cost/gpu_hours": gpu_hours, "cost/usd": gpu_hours * price,
                            "cost/flops": fpt * tokens_seen, "epoch": loader.epoch_of_step(loader.step)}
                 logger.log(step, metrics)
                 if is_main:
                     eta = (total_steps - step) * (dt / cfg.run.log_every)
                     print(f"[train] step {step}/{total_steps} loss {last_loss:.4f} lr {lr:.2e} gnorm {gnorm_v:.2f} | "
                           f"{tps/1e3:,.1f}k tok/s mfu {mfu:.1%} | {tokens_seen/1e9:.3f}B tok | "
-                          f"{gpu_hours:.2f} GPU-h (${gpu_hours*cfg.run.gpu_hour_price_usd:,.0f}) | eta {_fmt_time(eta)}",
+                          f"{gpu_hours:.2f} GPU-h (${gpu_hours*price:,.0f}) | eta {_fmt_time(eta)}",
                           flush=True)
                 t_log, tokens_log = now, tokens_seen
 
@@ -313,7 +318,7 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
     summary = {
         "run": cfg.run.name, "finished": step >= total_steps, "step": step, "tokens": tokens_seen,
         "n_params": n_params, "flops": fpt * tokens_seen, "gpu_hours": gpu_hours, "gpu_kind": jax.devices()[0].device_kind,
-        "n_devices": n_devices, "usd_equivalent": gpu_hours * cfg.run.gpu_hour_price_usd,
+        "n_devices": n_devices, "usd_equivalent": gpu_hours * price, "gpu_hour_price_usd": price,
         "micro_batch_per_device": micro_dev, "grad_accum": grad_accum,
         "train_loss": last_loss, "val_loss": val_loss,
         "val_ppl": math.exp(min(val_loss, 20)) if not math.isnan(val_loss) else None,

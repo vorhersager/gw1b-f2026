@@ -188,7 +188,8 @@ CPU (the tests), a V100, eight A100s or a GH200 without change.
 * **Loss / perplexity** — the next-token cross-entropy in nats per token, and `exp(loss)`. The number
   every experiment reports; `gw1b.evaluate` computes it on the held-out split for any checkpoint.
 * **Tokens/s, MFU, GPU-hours, $** — logged every `log_every` steps so every run states what it cost
-  (`run.gpu_hour_price_usd`, default $2, turns GPU-hours into the "$10,000 budget" framing).
+  (GPU-hours × a notional on-demand price per GPU type — V100 $1, A100 $2, H100 $3.5 … — or `run.gpu_hour_price_usd`
+  turn them into the "$10,000 budget" framing).
 * **Benchmarks** — `lm_eval` tasks on exported checkpoints; Team 4 decides which ones discriminate at
   sub-1B scale and checks contamination against the token shards.
 
