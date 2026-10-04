@@ -217,6 +217,13 @@ def test_viz_export_and_server(tmp_path):
     assert vec["rows"] == 1 and vec["cols"] == min(cfg.model.d_model, 8 * 8)   # vectors: at most tile*tile cells
     assert data["metrics"].get("train/loss") and data["metrics"]["step"] <= 4
     json.loads(vx.dumps(data))                                   # valid JSON (no NaN)
+    # the checkpoint above is FSDP-sharded over 8 fake devices; a 1-device process (the viz server on CPU) must
+    # still read it (Orbax "Topology mismatch" otherwise)
+    env = {**os.environ, "XLA_FLAGS": "", "JAX_PLATFORMS": "cpu"}
+    out = subprocess.run([sys.executable, "-m", "gw1b.viz.export", "--run", run_dir, "--tile", "4",
+                          "--out", str(tmp_path / "one-device.json")], cwd=ROOT, env=env, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert json.load(open(tmp_path / "one-device.json"))["step"] == 4
     html = vx.write_html(data, str(tmp_path / "model.html"))
     assert os.path.getsize(html) > 500_000 and 'id="gw1b-data"' in open(html).read()
 

@@ -52,19 +52,28 @@ def checkpoint_steps(run_dir: str) -> list[int]:
 
 
 def load_params(run_dir: str, step: int) -> dict[str, np.ndarray]:
-    """{'blocks.0.attn.q_proj.kernel': ndarray, ...} for one checkpoint step."""
+    """{'blocks.0.attn.q_proj.kernel': ndarray, ...} for one checkpoint step, as host numpy arrays.
+
+    The checkpoint was written by a (possibly multi-GPU, FSDP-sharded) training job; restoring it without a target
+    on another machine fails with Orbax's "Topology mismatch". So the parameter tree's structure is read from the
+    checkpoint's own metadata and every leaf is requested as a plain np.ndarray — no devices, no sharding involved.
+    """
     import jax
     import orbax.checkpoint as ocp
-    ckpt_dir = os.path.join(run_dir, "checkpoints")
-    mgr = ocp.CheckpointManager(os.path.abspath(ckpt_dir), options=ocp.CheckpointManagerOptions(read_only=True))
+    item_dir = os.path.join(os.path.abspath(run_dir), "checkpoints", str(step), "model")
+    if not os.path.isdir(item_dir):
+        raise FileNotFoundError(f"no model checkpoint at {item_dir}")
+    ckptr = ocp.PyTreeCheckpointer()
     try:
-        tree = mgr.restore(step, args=ocp.args.Composite(model=ocp.args.StandardRestore()))["model"]
+        meta = ckptr.metadata(item_dir)
+        tree = getattr(meta, "item_metadata", None) or getattr(meta, "tree", meta)
+        restore_args = jax.tree_util.tree_map(lambda m: ocp.RestoreArgs(restore_type=np.ndarray), tree)
+        restored = ckptr.restore(item_dir, args=ocp.args.PyTreeRestore(restore_args=restore_args))
     finally:
-        mgr.close()
+        ckptr.close()
     out: dict[str, np.ndarray] = {}
-    for path, leaf in jax.tree_util.tree_flatten_with_path(tree)[0]:
-        keys = [getattr(k, "key", getattr(k, "name", getattr(k, "idx", k))) for k in path]
-        keys = [str(k) for k in keys]
+    for path, leaf in jax.tree_util.tree_flatten_with_path(restored)[0]:
+        keys = [str(getattr(k, "key", getattr(k, "name", getattr(k, "idx", k)))) for k in path]
         if keys and keys[-1] == "value":
             keys = keys[:-1]
         out[".".join(keys)] = np.asarray(leaf, dtype=np.float32)
