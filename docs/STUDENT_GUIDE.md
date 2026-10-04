@@ -48,8 +48,8 @@ Shortcut from the laptop (does both steps and opens the browser):
 
 Useful:
 * `gw1b jupyter --info` — print the connection lines again; `gw1b jupyter --stop` — end the session.
-* `%load_ext tensorboard` / `%tensorboard --logdir <run>/tb` inside a notebook (port 6006 is tunnelled).
 * A JupyterLab *Terminal* runs inside the environment on the GPU node — handy for `nvidia-smi`, quick scripts.
+* Loss curves of a running job: `gw1b tensorboard` (section 3, "Watching a run").
 
 
 ### Two ways to get a notebook on a GPU node
@@ -89,6 +89,23 @@ class token shards under `$GW1B_SCRATCH/data/fineweb-edu-10B`, which the instruc
   `--time 1-00:00:00 --chain N` and let the checkpoint/resume logic do the rest.
 * Interactive shell on a GPU node (for debugging): `gw1b shell --gpus 1 --time 1:00:00`.
 
+### Watching a run
+
+A training job writes a line every `run.log_every` steps to its job output and every metric to
+`<run dir>/metrics.jsonl` and `<run dir>/tb/` (TensorBoard), all on the shared file system — so you can watch from
+anywhere, not only from the node the job runs on.
+
+* **Text, right now**: `gw1b log` follows the output of your latest job (`gw1b log team2-gqa-vs-mha` for a named one):
+  `[train] step 400/3814 loss 4.812 lr 6.00e-04 gnorm 0.61 | 11.2k tok/s mfu 31% | 0.105B tok | 2.6 GPU-h ($5) | eta 8:40:12`.
+* **TensorBoard**: with a `gw1b jupyter` session open (its tunnel forwards port 6006), run `gw1b tensorboard` on the
+  login node and open http://localhost:6006 on your laptop. It shows every run under `$GW1B_SCRATCH/users/<netid>/runs`
+  (`gw1b tensorboard <dir>` for another folder, e.g. your team's). Inside a notebook the same thing is
+  `%load_ext tensorboard` then `%tensorboard --logdir $GW1B_SCRATCH/users/$USER/runs --port 6006 --bind_all`.
+* **Your own plot** (what goes in the paper): notebook `03`, section 4 — `metrics.jsonl` → pandas → matplotlib; re-run
+  the cell to refresh. Compare runs by reading several `metrics.jsonl` files into one frame (`val/loss` vs `tokens_seen`).
+* **Weights & Biases**, if your team has accounts: compute nodes have internet, so
+  `WANDB_MODE=online WANDB_API_KEY=… gw1b train … --set run.wandb=true` streams to wandb.ai (project `gw1b`).
+
 ## 4. Where files live
 
 | path | what | notes |
@@ -126,6 +143,7 @@ same environment; `pip install --user` is disabled on purpose).
 gw1b jupyter [--gpus N --time T --partition P]   gw1b jupyter --info | --stop
 gw1b train [job opts] --config C [--set k=v]     gw1b run [job opts] <python args>     gw1b shell [job opts]
 gw1b status        gw1b cancel <id|all>          gw1b doctor [--gpu]      gw1b budget --config C --tokens N --gpu a100 --n-gpus 8
+gw1b log [run]     gw1b tensorboard [logdir]     (loss curves of running jobs: section 3)
 gw1b python -m gw1b.train --config C --dry-run   (prints the resolved config + cost estimate)
 python -m gw1b.evaluate --run R      python -m gw1b.generate --run R --prompt "…"      python -m gw1b.export_hf --run R --out D --verify
 ```

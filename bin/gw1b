@@ -12,6 +12,8 @@
 #   gw1b cancel <jobid|all>         cancel jobs
 #   gw1b doctor [--gpu]             check the setup (add --gpu to run a 3-minute GPU smoke test job)
 #   gw1b kernel                     install a "GW1B" Jupyter kernel for the Pegasus Jupyter app / VS Code
+#   gw1b tensorboard [logdir]       TensorBoard for your runs, through the Jupyter tunnel (http://localhost:6006)
+#   gw1b log [run-name|jobid]       follow the training log of your latest (or the named) job
 #   gw1b notebooks                  refresh ~/gw1b/notebooks from the class repo (your edited copies are kept as .bak)
 #
 # Job options (all optional): --gpus N  --gpu-type v100|a100|l40s|gh200|any  --nodes K  --partition NAME  --time D-HH:MM:SS
@@ -319,6 +321,30 @@ cmd_doctor() {
     [[ "$ok" == 1 ]] && echo "All checks passed." || { echo "Some checks failed — see docs/TROUBLESHOOTING.md"; exit 1; }
 }
 
+cmd_tensorboard() {  # gw1b tensorboard [logdir] — runs inside your Jupyter job, so the existing tunnel (port 6006) reaches it
+    local logdir="${1:-$USER_DIR/runs}"
+    [[ -d "$logdir" ]] || die "no such directory: $logdir (default: $USER_DIR/runs — all your runs)"
+    local id; id="$(squeue -u "$USER" -h -n gw1b-jupyter -t R -o %i 2>/dev/null | head -1 || true)"
+    if [[ -z "$id" ]]; then
+        die "no running Jupyter job. TensorBoard needs the tunnel of 'gw1b jupyter' (port 6006): start one, then run this again — or plot metrics.jsonl (see docs/STUDENT_GUIDE.md, 'Watching a run')"
+    fi
+    local node; node="$(squeue -j "$id" -h -o %N 2>/dev/null)"
+    info "TensorBoard on $node inside Jupyter job $id, logdir $logdir"
+    info "open  http://localhost:6006  on your laptop (the 'gw1b jupyter' tunnel forwards 6006). Ctrl-C stops TensorBoard, not the job."
+    exec srun --jobid="$id" --overlap --export=ALL,GW1B_HOME="$GW1B_HOME" --pty \
+        "$GW1B_HOME/bin/gw1b-exec" tensorboard --logdir "$logdir" --port 6006 --bind_all --reload_interval 15
+}
+
+cmd_log() {  # gw1b log [run-name|jobid] — follow the output of a job (default: your most recent gw1b job)
+    local f
+    if [[ -n "${1:-}" && -f "$USER_DIR/jobs/$1" ]]; then f="$USER_DIR/jobs/$1"
+    elif [[ -n "${1:-}" ]]; then f="$(ls -t "$USER_DIR"/jobs/*"$1"*.out 2>/dev/null | head -1 || true)"
+    else f="$(ls -t "$USER_DIR"/jobs/*.out 2>/dev/null | grep -v "gw1b-jupyter\|gw1b-smoke" | head -1 || true)"; fi
+    [[ -n "$f" && -f "$f" ]] || die "no job output found${1:+ matching '$1'} in $USER_DIR/jobs"
+    info "$f   (Ctrl-C stops following; the job keeps running)"
+    exec tail -n 40 -f "$f"
+}
+
 cmd_notebooks() {  # copy the current class notebooks into ~/gw1b/notebooks; a student's edited copy is kept as a .bak
     local src="$GW1B_HOME/notebooks" dst="$HOME/gw1b/notebooks" f name n=0 kept=0
     mkdir -p "$dst"
@@ -380,6 +406,8 @@ case "$cmd" in
     doctor)   cmd_doctor "$@" ;;
     kernel)   cmd_kernel ;;
     notebooks) cmd_notebooks ;;
+    tensorboard|tb) cmd_tensorboard "$@" ;;
+    log|logs) cmd_log "$@" ;;
     version)  echo "gw1b env $GW1B_ENV_VERSION ($GW1B_HOME)" ;;
     help|-h|--help) usage ;;
     *) die "unknown command '$cmd' (try: gw1b help)" ;;

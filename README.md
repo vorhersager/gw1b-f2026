@@ -94,6 +94,7 @@ gw1b python -m gw1b.train --config configs/100m.yaml --dry-run      # resolved c
 gw1b jupyter [--gpus N --time T --partition P]   gw1b jupyter --info | --stop
 gw1b train [job opts] --config C [--set k=v]     gw1b run [job opts] <python args>     gw1b shell [job opts]
 gw1b status        gw1b cancel <id|all>          gw1b doctor [--gpu]      gw1b budget …      gw1b kernel      gw1b notebooks
+gw1b log [run]     gw1b tensorboard [logdir]     (watch a running job: text log / loss curves through the Jupyter tunnel)
 python -m gw1b.evaluate --run R      python -m gw1b.generate --run R --prompt "…"      python -m gw1b.export_hf --run R --out D --verify
 ```
 Full guide: [`docs/STUDENT_GUIDE.md`](docs/STUDENT_GUIDE.md) · what the GPUs and tools are: [`docs/PRIMER.md`](docs/PRIMER.md) · Colab: [`docs/COLAB.md`](docs/COLAB.md) ·
