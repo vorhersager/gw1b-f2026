@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GW1B model visualizer</title>
+<style>
+  :root { --bg: #0e1117; --panel: rgba(18, 22, 30, 0.92); --line: #2a3140; --fg: #e6e9ef; --muted: #8b94a7; --accent: #6fb3ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #c { position: fixed; inset: 0; display: block; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; backdrop-filter: blur(6px); }
+  #ui { top: 12px; left: 12px; width: 330px; max-height: calc(100% - 24px); overflow: auto; }
+  #ui h1 { font-size: 15px; margin: 0 0 6px; font-weight: 600; letter-spacing: .2px; }
+  #ui h1 small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+  .row label { color: var(--muted); min-width: 52px; }
+  select, button, input[type=number] { background: #161b25; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font: inherit; }
+  select { max-width: 200px; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  input[type=range] { width: 120px; }
+  #metrics { margin: 8px 0 4px; padding: 8px; background: #121722; border-radius: 6px; line-height: 1.6; }
+  #metrics b { color: var(--fg); font-weight: 600; } #metrics span { color: var(--muted); }
+  #status { color: var(--accent); min-height: 1.2em; }
+  #legend { display: block; width: 300px; height: 14px; border-radius: 3px; margin-top: 4px; }
+  #legendlbl { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  #info { right: 12px; top: 12px; width: 300px; display: none; }
+  #info h2 { font-size: 14px; margin: 0 0 2px; } #info .id { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; word-break: break-all; }
+  #info table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 12px; }
+  #info td { padding: 1px 0; } #info td:last-child { text-align: right; font-family: ui-monospace, Menlo, monospace; }
+  #info canvas { display: block; width: 100%; border-radius: 4px; background: #121722; margin-top: 6px; }
+  #help { bottom: 12px; left: 12px; color: var(--muted); font-size: 11.5px; }
+  #help kbd { background: #1a2030; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  .hint { color: var(--muted); font-size: 11.5px; }
+</style>
+<script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui" class="panel">
+  <h1>GW1B model visualizer <small id="title"></small></h1>
+  <div class="row" id="runrow"><label>run</label><select id="run"></select><button id="rescan" title="re-read the run directories">↻</button></div>
+  <div class="row" id="steprow"><label>step</label><select id="step"></select>
+    <label style="min-width:0"><input type="checkbox" id="follow" checked> follow latest</label></div>
+  <div id="metrics"></div>
+  <div class="row"><label>show</label>
+    <select id="mode">
+      <option value="rms">weight magnitude (block RMS)</option>
+      <option value="mean">weight sign (block mean)</option>
+      <option value="delta">change since previous checkpoint</option>
+    </select></div>
+  <div class="row"><label>scale</label>
+    <select id="scale"><option value="tensor">per tensor</option><option value="global">global</option></select>
+    <label style="min-width:0"><input type="checkbox" id="labels" checked> labels</label></div>
+  <div class="row"><label>spacing</label><input type="range" id="spacing" min="0.5" max="3" step="0.1" value="1">
+    <button id="reset">reset view</button></div>
+  <canvas id="legend" width="300" height="14"></canvas>
+  <div id="legendlbl"><span id="lmin"></span><span id="lmid"></span><span id="lmax"></span></div>
+  <div id="status"></div>
+  <div class="hint" id="hint"></div>
+</div>
+
+<div id="info" class="panel">
+  <h2 id="iname"></h2><div class="id" id="iid"></div>
+  <table id="itable"></table>
+  <canvas id="ihist" width="276" height="70"></canvas>
+  <canvas id="itile" width="276" height="276"></canvas>
+</div>
+
+<div id="help" class="panel">drag: rotate · right-drag / shift-drag: pan · wheel: zoom · hover: details · click: focus · <kbd>r</kbd> reset</div>
+
+<script type="module" src="viz.js"></script>
+</body>
+</html>

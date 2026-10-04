@@ -23,7 +23,7 @@ node="$(hostname -s)"
 info="$user_dir/jobs/jupyter-$SLURM_JOB_ID.json"
 url="http://localhost:${GW1B_LOCAL_PORT:-8888}/lab?token=$token"
 colab_url="http://localhost:${GW1B_LOCAL_PORT:-8888}/?token=$token"
-tunnel="ssh -N -L ${GW1B_LOCAL_PORT:-8888}:$node:$port -L 6006:$node:6006 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 $USER@$GW1B_LOGIN_HOST"
+tunnel="ssh -N -L ${GW1B_LOCAL_PORT:-8888}:$node:$port -L 6006:$node:6006 -L 6007:$node:6007 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 $USER@$GW1B_LOGIN_HOST"
 
 cat > "$info" <<EOF
 {"job_id": "$SLURM_JOB_ID", "node": "$node", "port": $port, "token": "$token",

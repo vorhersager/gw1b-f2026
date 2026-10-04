@@ -16,14 +16,15 @@ $remote = "bash -lc 'source $GW1B_HOME_REMOTE/activate.sh >/dev/null 2>&1; gw1b 
 Write-Host "[gw1b] connecting to $LoginHost as $NetId ..."
 $out = & ssh -tt "$NetId@$LoginHost" $remote 2>&1 | Out-String
 Write-Host $out
-$m = [regex]::Match($out, 'ssh -N -L (\S+) -L (\S+).* (\S+@\S+)')
-if (-not $m.Success) { Write-Error "[gw1b] could not find the tunnel command in the output above"; exit 1 }
-$fwd1 = $m.Groups[1].Value; $fwd2 = $m.Groups[2].Value; $target = $m.Groups[3].Value
+$line = ($out -split "`n" | Where-Object { $_ -match 'ssh -N -L ' } | Select-Object -First 1)
+$fwds = @(); foreach ($fm in [regex]::Matches("$line", '-L (\S+)')) { $fwds += @('-L', $fm.Groups[1].Value) }
+$tm = [regex]::Matches("$line", '(\S+@\S+)'); $target = if ($tm.Count) { $tm[$tm.Count - 1].Groups[1].Value } else { '' }
+if (-not $target -or $fwds.Count -eq 0) { Write-Error "[gw1b] could not find the tunnel command in the output above"; exit 1 }
 $url = [regex]::Match($out, 'http://localhost:\d+/lab\?token=[a-f0-9]+').Value
 Write-Host ""
-Write-Host "[gw1b] opening tunnel: ssh -N -L $fwd1 -L $fwd2 $target"
+Write-Host "[gw1b] opening tunnel: ssh -N $($fwds -join ' ') $target"
 Write-Host "[gw1b] JupyterLab: $url"
 Write-Host "[gw1b] Colab: Connect -> Connect to a local runtime -> $($url -replace '/lab\?', '/?')"
 Write-Host "[gw1b] (Ctrl-C closes the tunnel; the job keeps running)"
 Start-Job -ScriptBlock { param($u) Start-Sleep 4; Start-Process $u } -ArgumentList $url | Out-Null
-& ssh -N -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes -L $fwd1 -L $fwd2 $target
+& ssh -N -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes @fwds $target

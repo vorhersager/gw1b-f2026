@@ -188,6 +188,56 @@ def test_train_checkpoint_resume(tmp_path):
     assert os.path.exists(tmp_path / "users/test/runs/tiny_debug/summary.json")
 
 
+def test_viz_export_and_server(tmp_path):
+    """gw1b.viz: a checkpoint reduces to tiles + stats; the server lists runs and serves the export and the page."""
+    import json
+    import threading
+    import urllib.request
+    from gw1b.config import load_config
+    from gw1b.train import train
+    from gw1b.viz import export as vx, server as vs
+    write_synthetic_dataset(str(tmp_path / "train"), n_tokens=20_000, shard_size=10_000)
+    cfg = load_config(os.path.join(ROOT, "configs", "tiny_debug.yaml"),
+                      [f"data.train_dir={tmp_path}/train", "data.val_dir=", f"run.out_dir={tmp_path}/runs", "run.name=viz",
+                       "run.total_steps=4", "run.ckpt_every=2", "run.log_every=2", "run.eval_every=1000", "run.tensorboard=false"])
+    train(cfg, resume=False)
+    run_dir = str(tmp_path / "runs" / "viz")
+    assert vx.checkpoint_steps(run_dir) == [2, 4]
+    data = vx.export_run(run_dir, tile=8)
+    assert data["step"] == 4 and data["compare_step"] == 2 and data["n_params"] == cfg.model.n_params
+    ids = {t["id"] for t in data["tensors"]}
+    assert "embed.embedding" in ids and "blocks.0.attn.q_proj.kernel" in ids and "final_norm.scale" in ids
+    q = next(t for t in data["tensors"] if t["id"] == "blocks.0.attn.q_proj.kernel")
+    assert q["layer"] == 0 and q["group"] == "attn" and q["label"] == "Q" and q["rows"] <= 8 and q["cols"] <= 8
+    assert len(q["rms"]) == q["rows"] * q["cols"] == len(q["mean"]) == len(q["delta"]) and q["delta_stats"]["rel"] > 0
+    assert all(v >= 0 for v in q["rms"]) and abs(q["stats"]["rms"] - cfg.model.init_std) < 0.01
+    emb = next(t for t in data["tensors"] if t["id"] == "embed.embedding")
+    assert emb["shape"] == [cfg.model.vocab_size, cfg.model.d_model] and emb["rows"] == 8
+    vec = next(t for t in data["tensors"] if t["id"] == "final_norm.scale")
+    assert vec["rows"] == 1 and vec["cols"] == min(cfg.model.d_model, 8 * 8)   # vectors: at most tile*tile cells
+    assert data["metrics"].get("train/loss") and data["metrics"]["step"] <= 4
+    json.loads(vx.dumps(data))                                   # valid JSON (no NaN)
+    html = vx.write_html(data, str(tmp_path / "model.html"))
+    assert os.path.getsize(html) > 500_000 and 'id="gw1b-data"' in open(html).read()
+
+    httpd = vs.serve([str(tmp_path / "runs")], host="127.0.0.1", port=0, tile=8)
+    port = httpd.server_address[1]
+    th = threading.Thread(target=httpd.serve_forever, daemon=True); th.start()
+    try:
+        get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=30).read()
+        runs = json.loads(get("/api/runs"))["runs"]
+        assert [r["name"] for r in runs] == ["viz"] and runs[0]["latest"] == 4
+        exp = json.loads(get("/api/export?run=viz&step=4"))
+        assert exp["step"] == 4 and exp["compare_step"] == 2
+        assert os.path.exists(os.path.join(run_dir, "viz", "step-4-vs-2.json"))   # disk cache
+        assert json.loads(get("/api/export?run=viz&step=2&compare=none"))["compare_step"] is None
+        assert b"GW1B model visualizer" in get("/") and b"OrbitControls" in get("/vendor/OrbitControls.js")
+        with pytest.raises(urllib.error.HTTPError):
+            get("/api/export?run=nope")
+    finally:
+        httpd.shutdown(); httpd.server_close()
+
+
 def test_generate_batched_equals_single(tmp_path):
     from gw1b.generate import generate
     from gw1b.tokenizer import Tokenizer, train_sentencepiece

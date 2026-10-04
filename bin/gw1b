@@ -13,6 +13,7 @@
 #   gw1b doctor [--gpu]             check the setup (add --gpu to run a 3-minute GPU smoke test job)
 #   gw1b kernel                     install a "GW1B" Jupyter kernel for the Pegasus Jupyter app / VS Code
 #   gw1b tensorboard [logdir]       TensorBoard for your runs, through the Jupyter tunnel (http://localhost:6006)
+#   gw1b viz [runs-dir ...]         3D model/weights visualizer for your runs, through the Jupyter tunnel (http://localhost:6007)
 #   gw1b log [run-name|jobid]       follow the training log of your latest (or the named) job
 #   gw1b notebooks                  refresh ~/gw1b/notebooks from the class repo (your edited copies are kept as .bak)
 #
@@ -223,11 +224,13 @@ print_jupyter_info() {
   Jupyter job $1 is RUNNING on $node (GPU node), JupyterLab on port $port is $reach.  Time limit: $(squeue -j "$1" -h -o %L) left.
 
   1) On YOUR LAPTOP, in a new terminal (keep it open):
-       ssh -N -L $lport:$node:$port -L 6006:$node:6006 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 $USER@$GW1B_LOGIN_HOST
+       ssh -N -L $lport:$node:$port -L 6006:$node:6006 -L 6007:$node:6007 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 $USER@$GW1B_LOGIN_HOST
      (an older tunnel still open on your laptop blocks port $lport: close it first — with these options ssh says so and exits)
 
   2) JupyterLab:   http://localhost:$lport/lab?token=$token
      Colab:        Connect ▾ -> "Connect to a local runtime" -> http://localhost:$lport/?token=$token
+
+     TensorBoard:  gw1b tensorboard  -> http://localhost:6006     3D model visualizer:  gw1b viz  -> http://localhost:6007
 
   3) Finished?     gw1b cancel $1
 EOF
@@ -335,6 +338,20 @@ cmd_tensorboard() {  # gw1b tensorboard [logdir] — runs inside your Jupyter jo
         "$GW1B_HOME/bin/gw1b-exec" tensorboard --logdir "$logdir" --port 6006 --bind_all --reload_interval 15
 }
 
+cmd_viz() {  # gw1b viz [runs-dir ...] — the 3D visualizer server inside your Jupyter job (tunnel port 6007), CPU only
+    local -a roots=("$@"); [[ ${#roots[@]} -gt 0 ]] || roots=("$USER_DIR/runs")
+    local r; for r in "${roots[@]}"; do [[ -d "$r" ]] || die "no such directory: $r"; done
+    local id; id="$(squeue -u "$USER" -h -n gw1b-jupyter -t R -o %i 2>/dev/null | head -1 || true)"
+    if [[ -z "$id" ]]; then
+        die "no running Jupyter job. The visualizer is reached through the tunnel of 'gw1b jupyter' (port 6007): start one, then run this again — or export a page: gw1b python -m gw1b.viz.export --run <run dir> --html model.html"
+    fi
+    local node; node="$(squeue -j "$id" -h -o %N 2>/dev/null)"
+    info "visualizer on $node inside Jupyter job $id for: ${roots[*]}"
+    info "open  http://localhost:6007  on your laptop (the 'gw1b jupyter' tunnel forwards 6007). Ctrl-C stops it, not the job."
+    exec srun --jobid="$id" --overlap --export=ALL,GW1B_HOME="$GW1B_HOME",JAX_PLATFORMS=cpu --pty \
+        "$GW1B_HOME/bin/gw1b-exec" python -m gw1b.viz.server --runs "${roots[@]}" --port 6007
+}
+
 cmd_log() {  # gw1b log [run-name|jobid] — follow the output of a job (default: your most recent gw1b job)
     local f
     if [[ -n "${1:-}" && -f "$USER_DIR/jobs/$1" ]]; then f="$USER_DIR/jobs/$1"
@@ -407,6 +424,7 @@ case "$cmd" in
     kernel)   cmd_kernel ;;
     notebooks) cmd_notebooks ;;
     tensorboard|tb) cmd_tensorboard "$@" ;;
+    viz|visualizer) cmd_viz "$@" ;;
     log|logs) cmd_log "$@" ;;
     version)  echo "gw1b env $GW1B_ENV_VERSION ($GW1B_HOME)" ;;
     help|-h|--help) usage ;;

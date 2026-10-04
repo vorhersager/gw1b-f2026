@@ -18,7 +18,10 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["gw1b"]
+packages = ["gw1b", "gw1b.viz"]
+
+[tool.setuptools.package-data]
+"gw1b.viz" = ["static/*", "static/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

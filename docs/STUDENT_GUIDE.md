@@ -34,7 +34,7 @@ gw1b jupyter --gpus 2 --time 3:00:00               # 2 V100s (4 = a NVLink node)
 Wait until it prints:
 ```
   1) On YOUR LAPTOP, in a new terminal (keep it open):
-       ssh -N -L 8888:gpu017:8891 -L 6006:gpu017:6006 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 jsmith@pegasus.arc.gwu.edu
+       ssh -N -L 8888:gpu017:8891 -L 6006:gpu017:6006 -L 6007:gpu017:6007 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 jsmith@pegasus.arc.gwu.edu
   2) JupyterLab:   http://localhost:8888/lab?token=…
      Colab:        Connect ▾ -> "Connect to a local runtime" -> http://localhost:8888/?token=…
   3) Finished?     gw1b cancel 123456
@@ -59,7 +59,7 @@ Useful:
 | start | `gw1b jupyter` on the login node, then the printed `ssh -N -L …` on your laptop (the laptop script does both with one 2FA prompt) | portal → *Jupyter Notebook Pegasus* → pick partition `gpu`, GPU type, time → review every field → Launch |
 | notebook UI | JupyterLab in your browser **or Google Colab** (*Connect to a local runtime*) | classic Jupyter in the portal |
 | the GW1B environment | automatic | run `gw1b kernel` once; then select the **GW1B (JAX)** kernel — the app reads `~/.local/share/jupyter/kernels` |
-| good for | Colab users, TensorBoard (port 6006 is in the tunnel) | no ssh, no tunnel |
+| good for | Colab users, TensorBoard and the 3D visualizer (ports 6006/6007 are in the tunnel) | no ssh, no tunnel |
 
 
 ## 3. Longer work: batch jobs
@@ -101,6 +101,9 @@ anywhere, not only from the node the job runs on.
   login node and open http://localhost:6006 on your laptop. It shows every run under `$GW1B_SCRATCH/users/<netid>/runs`
   (`gw1b tensorboard <dir>` for another folder, e.g. your team's). Inside a notebook the same thing is
   `%load_ext tensorboard` then `%tensorboard --logdir $GW1B_SCRATCH/users/$USER/runs --port 6006 --bind_all`.
+* **The model itself, in 3D**: `gw1b viz` (with a Jupyter session open) → http://localhost:6007 — the architecture as a
+  tower of slabs coloured by the weights of any checkpoint, hover for statistics, *follow latest* reloads as the run
+  writes new checkpoints; **change since previous checkpoint** shows which layers are still moving. [VISUALIZER.md](VISUALIZER.md).
 * **Your own plot** (what goes in the paper): notebook `03`, section 4 — `metrics.jsonl` → pandas → matplotlib; re-run
   the cell to refresh. Compare runs by reading several `metrics.jsonl` files into one frame (`val/loss` vs `tokens_seen`).
 * **Weights & Biases**, if your team has accounts: compute nodes have internet, so
@@ -143,7 +146,7 @@ same environment; `pip install --user` is disabled on purpose).
 gw1b jupyter [--gpus N --time T --partition P]   gw1b jupyter --info | --stop
 gw1b train [job opts] --config C [--set k=v]     gw1b run [job opts] <python args>     gw1b shell [job opts]
 gw1b status        gw1b cancel <id|all>          gw1b doctor [--gpu]      gw1b budget --config C --tokens N --gpu a100 --n-gpus 8
-gw1b log [run]     gw1b tensorboard [logdir]     (loss curves of running jobs: section 3)
+gw1b log [run]     gw1b tensorboard [logdir]     gw1b viz [dir]      (watch a running job: section 3)
 gw1b python -m gw1b.train --config C --dry-run   (prints the resolved config + cost estimate)
 python -m gw1b.evaluate --run R      python -m gw1b.generate --run R --prompt "…"      python -m gw1b.export_hf --run R --out D --verify
 ```

@@ -22,14 +22,16 @@ echo "[gw1b] connecting to $LOGIN_HOST as $netid ..."
 out="$(ssh -tt "${ctl[@]}" "$netid@$LOGIN_HOST" \
       "bash -lc 'source $GW1B_HOME_REMOTE/activate.sh >/dev/null 2>&1; gw1b jupyter --local-port $LOCAL_PORT $*'" | tr -d '\r')" || true
 echo "$out"
-read -r fwd1 fwd2 target <<< "$(printf '%s\n' "$out" | sed -n 's/.*ssh -N -L \([^ ]*\) -L \([^ ]*\).* \([^ ]*@[^ ]*\).*/\1 \2 \3/p' | head -1)"
-[[ -n "${target:-}" ]] || { echo "[gw1b] could not find the tunnel command in the output above"; exit 1; }
+line="$(printf '%s\n' "$out" | grep -m1 -E 'ssh -N -L ' || true)"
+target="$(printf '%s\n' "$line" | grep -oE '[^ ]+@[^ ]+' | tail -1 || true)"
+fwds=(); while read -r f; do [[ -n "$f" ]] && fwds+=(-L "$f"); done < <(printf '%s\n' "$line" | grep -oE -- '-L [^ ]+' | awk '{print $2}')
+[[ -n "${target:-}" && ${#fwds[@]} -gt 0 ]] || { echo "[gw1b] could not find the tunnel command in the output above"; exit 1; }
 url="$(printf '%s\n' "$out" | grep -m1 -oE 'http://localhost:[0-9]+/lab\?token=[a-f0-9]+' || true)"
 
 echo
-echo "[gw1b] opening tunnel:  ssh -N -L $fwd1 -L $fwd2 $target"
+echo "[gw1b] opening tunnel:  ssh -N ${fwds[*]} $target"
 echo "[gw1b] JupyterLab: $url"
 echo "[gw1b] Colab: Connect ▾ -> Connect to a local runtime -> ${url/\/lab?/\/?}"
 echo "[gw1b] (Ctrl-C closes the tunnel; the job keeps running)"
 ( sleep 3; { command -v open >/dev/null && open "$url"; } || { command -v xdg-open >/dev/null && xdg-open "$url"; } || true ) >/dev/null 2>&1 &
-exec ssh -N "${ctl[@]}" -L "$fwd1" -L "$fwd2" "$target"
+exec ssh -N "${ctl[@]}" "${fwds[@]}" "$target"

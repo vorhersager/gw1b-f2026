@@ -54,7 +54,7 @@ gw1b jupyter --gpus 2 --time 3:00:00              # 2 V100s; --gpu-type a100 for
 When the job starts it prints:
 ```
   1) On YOUR LAPTOP, in a new terminal (keep it open):
-       ssh -N -L 8888:gpu017:8891 -L 6006:gpu017:6006 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 <netid>@pegasus.arc.gwu.edu
+       ssh -N -L 8888:gpu017:8891 -L 6006:gpu017:6006 -L 6007:gpu017:6007 -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 <netid>@pegasus.arc.gwu.edu
   2) JupyterLab:   http://localhost:8888/lab?token=…
      Colab:        Connect ▾ -> "Connect to a local runtime" -> http://localhost:8888/?token=…
   3) Finished?     gw1b cancel 123456
@@ -94,7 +94,7 @@ gw1b python -m gw1b.train --config configs/100m.yaml --dry-run      # resolved c
 gw1b jupyter [--gpus N --time T --partition P]   gw1b jupyter --info | --stop
 gw1b train [job opts] --config C [--set k=v]     gw1b run [job opts] <python args>     gw1b shell [job opts]
 gw1b status        gw1b cancel <id|all>          gw1b doctor [--gpu]      gw1b budget …      gw1b kernel      gw1b notebooks
-gw1b log [run]     gw1b tensorboard [logdir]     (watch a running job: text log / loss curves through the Jupyter tunnel)
+gw1b log [run]     gw1b tensorboard [logdir]     gw1b viz [dir]     (watch a running job: text log / loss curves / 3D weights, through the Jupyter tunnel)
 python -m gw1b.evaluate --run R      python -m gw1b.generate --run R --prompt "…"      python -m gw1b.export_hf --run R --out D --verify
 ```
 Full guide: [`docs/STUDENT_GUIDE.md`](docs/STUDENT_GUIDE.md) · what the GPUs and tools are: [`docs/PRIMER.md`](docs/PRIMER.md) · Colab: [`docs/COLAB.md`](docs/COLAB.md) ·
@@ -150,6 +150,7 @@ The `gw1b` Python package (JAX 0.10 · Flax NNX · Optax · Orbax · SentencePie
 | `gw1b.lm_eval_adapter` | HellaSwag, ARC, PIQA, Winogrande, MMLU, GSM8K, … on the JAX model through lm-evaluation-harness |
 | `gw1b.export_hf` | checkpoint → `LlamaForCausalLM` safetensors, verified against `transformers` |
 | `gw1b.budget` | FLOPs → GPU-hours → wall-clock → $ for any config and GPU type |
+| `gw1b.viz` | interactive 3D visualizer of the architecture with the weights of any checkpoint, refreshing as a run trains (`gw1b viz`; [docs/VISUALIZER.md](docs/VISUALIZER.md)) |
 
 Configs: `configs/tiny_debug.yaml` (runs in a minute anywhere), the scaling ladder `50m` / `100m` / `200m` / `350m`,
 and `gw1b_1p15b.yaml` — the design-document architecture (32 layers, d = 1792, 28 heads / 7 KV heads, SwiGLU 4864,
@@ -185,7 +186,7 @@ gw1b/               the Python package
 configs/            tiny_debug, 50m, 100m, 200m, 350m, gw1b_1p15b
 notebooks/          00 hello → 01 tokenizer → 02 data → 03 train → 04 evaluate/export (+ make_notebooks.py)
 tests/              CPU smoke tests (model, KV cache, sharded training, loader, checkpoint/resume, generation, export)
-docs/               PRIMER · STUDENT_GUIDE · COLAB · INSTRUCTOR_SETUP · TEAM_PLAYBOOK · CLUSTER_FACTS · ARCHITECTURE · TROUBLESHOOTING
+docs/               PRIMER · STUDENT_GUIDE · COLAB · VISUALIZER · INSTRUCTOR_SETUP · TEAM_PLAYBOOK · CLUSTER_FACTS · ARCHITECTURE · TROUBLESHOOTING
 ```
 
 ## Developing on a laptop (no GPU needed)

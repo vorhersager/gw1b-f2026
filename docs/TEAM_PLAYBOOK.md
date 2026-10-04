@@ -65,6 +65,9 @@ them in `$GW1B_SCRATCH/teams/team<N>/runs` (`--set run.out_dir=…`).
   ```
   then train linear probes (scikit-learn is installed) per layer and per checkpoint.
 * Calibration / factuality classifiers: `lm_eval_adapter.GW1BLM.loglikelihood(...)` gives per-continuation log-probs.
+* Weights over training: the 3D visualizer (`gw1b viz`, [VISUALIZER.md](VISUALIZER.md)) shows every matrix of any
+  checkpoint and the change between checkpoints; `gw1b.viz.export.load_params(run_dir, step)` gives you the same
+  arrays as numpy for your own analyses (per-head norms, weight-matrix spectra, similarity across steps).
 
 ## Everyone
 
