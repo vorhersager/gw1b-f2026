@@ -73,6 +73,10 @@ gw1b run   --cpu  --cpus 16 --time 4:00:00 my_script.py --arg value        # CPU
 gw1b status                                                                 # your jobs, free GPUs
 gw1b cancel <jobid>
 ```
+`--config` takes `configs/50m.yaml`, `50m.yaml` or just `50m` from any directory (the repo's `configs/` is
+searched; a `configs/` folder in your current directory wins, e.g. `cd ~/gw1b` for your own copies). Runs read the
+class token shards under `$GW1B_SCRATCH/data/fineweb-edu-10B`, which the instructor builds once with `gw1b-admin data`.
+
 * Output goes to `$GW1B_SCRATCH/users/<netid>/jobs/<name>-<jobid>.out`; the run itself to
   `$GW1B_SCRATCH/users/<netid>/runs/<run.name>/` (`config.yaml`, `metrics.jsonl`, `tb/`, `checkpoints/`, `summary.json`).
 * **Time limits**: if the job hits its limit, just resubmit the same command — it resumes from the last checkpoint.

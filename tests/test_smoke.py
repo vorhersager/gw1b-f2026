@@ -41,6 +41,20 @@ def test_design_doc_config_is_1p15b():
     assert abs(cfg.model.n_params / 1e9 - 1.15) < 0.01
 
 
+def test_config_found_from_any_directory(tmp_path, monkeypatch):
+    """`gw1b train --config configs/50m.yaml` runs from $HOME: the path is resolved against the repo as well."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GW1B_HOME", raising=False)
+    ref = load_config(os.path.join(ROOT, "configs", "50m.yaml"))
+    for spec in ("configs/50m.yaml", "50m.yaml", "50m"):
+        assert load_config(spec).model == ref.model, spec
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "50m.yaml").write_text("model: {n_layers: 3}\n")   # a student's own copy wins where it exists
+    assert load_config("configs/50m.yaml").model.n_layers == 3
+    with pytest.raises(FileNotFoundError, match="not found"):
+        load_config("configs/nope.yaml")
+
+
 def test_kv_cache_matches_full_forward():
     cfg = ModelConfig(**TINY)
     model = GW1BModel(cfg, rngs=nnx.Rngs(0))

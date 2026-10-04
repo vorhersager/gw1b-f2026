@@ -102,7 +102,10 @@ class TokenDataset:
         for p in paths:
             files += sorted(glob.glob(os.path.join(p, "*.bin"))) if os.path.isdir(p) else sorted(glob.glob(p))
         if not files:
-            raise FileNotFoundError(f"No token shards (*.bin) found in {path}")
+            raise FileNotFoundError(
+                f"No token shards (*.bin) found in {path}. The class dataset is built once by the instructor with "
+                f"`gw1b-admin data` (FineWeb-Edu -> $GW1B_SCRATCH/data/fineweb-edu-10B); for your own data point "
+                f"data.train_dir / data.val_dir at a folder of shards written by gw1b.prepare_data (notebook 02).")
         self.files = files
         self.seq_len = seq_len
         self.shards = [read_shard(f) for f in files]

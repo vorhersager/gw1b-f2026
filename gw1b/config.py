@@ -193,11 +193,49 @@ def _build(section_cls, values: dict[str, Any]):
     return section_cls(**kwargs)
 
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def resolve_config_path(path: str) -> str:
+    """Find a config file given as `configs/50m.yaml`, `50m.yaml` or just `50m`, from any working directory.
+
+    Order: the path as given (absolute or relative to the current directory), then the same path under the
+    repository root (`$GW1B_HOME`, where the configs/ folder lives), then configs/<basename> there. So
+    `gw1b train --config configs/50m.yaml` works from $HOME as well as from a checkout, and a student's own
+    copy in ./configs/ wins when they run from its parent directory.
+    """
+    if not path:
+        return path
+    names = [path] if path.endswith((".yaml", ".yml")) else [path, path + ".yaml"]
+    roots = [r for r in (os.environ.get("GW1B_HOME"), REPO_ROOT) if r]
+    candidates: list[str] = []
+    for n in names:
+        candidates.append(n)
+    for r in roots:
+        for n in names:
+            candidates.append(os.path.join(r, n))
+            candidates.append(os.path.join(r, "configs", os.path.basename(n)))
+    seen: set[str] = set()
+    for c in candidates:
+        c = os.path.expanduser(os.path.expandvars(c))
+        if c in seen:
+            continue
+        seen.add(c)
+        if os.path.isfile(c):
+            return c
+    looked = ", ".join(dict.fromkeys(candidates))
+    raise FileNotFoundError(f"config {path!r} not found (looked for: {looked}). "
+                            f"Available: {', '.join(sorted(os.listdir(os.path.join(REPO_ROOT, 'configs'))))}")
+
+
 def load_config(path: str | None = None, overrides: list[str] | None = None) -> TrainConfig:
-    """Load a YAML config (optionally chained with `extends: other.yaml`) and apply overrides."""
+    """Load a YAML config (optionally chained with `extends: other.yaml`) and apply overrides.
+
+    `path` may be `configs/50m.yaml`, `50m.yaml` or `50m` (see resolve_config_path).
+    """
     raw: dict[str, Any] = {}
     if path:
-        raw = _load_yaml_with_extends(path)
+        raw = _load_yaml_with_extends(resolve_config_path(path))
     for item in overrides or []:
         if "=" not in item:
             raise ValueError(f"Override must look like section.field=value, got {item!r}")
