@@ -83,8 +83,8 @@ HPC staff also offered to build containers on request (send them `env/gw1b.def`)
 * **The GW-1B run**: `gw1b train --gpus 8 --gpu-type a100 --time 1-00:00:00 --chain 4 --config configs/gw1b_1p15b.yaml`.
   Chained 1-day jobs (HPC: 8-GPU jobs dequeued within 2 days in September; longer requests wait longer) resume from
   the last Orbax checkpoint (every 500 steps ≈ 0.5B tokens ≈ 40 min on 8 A100s), so the run can also continue on
-  half a node when a full one is not free: `gw1b train --gpus 4 --gpu-type a100 --one-socket --set optim.grad_accum=2
-  …` (same global batch; `--one-socket` = HPC's recipe for the four GPUs of one CPU socket). Expect ~55 h per 20B
+  half a node when a full one is not free: `gw1b train --gpus 4 --gpu-type a100 --one-socket …`
+  (`run.batch_size` is global, so the same 1M-token step; `--one-socket` = HPC's recipe for the four GPUs of one CPU socket). Expect ~55 h per 20B
   tokens on 8 A100s at 35 % MFU, 106 h on 4. Alternatives: one Grace Hopper node (`--gpu-type gh200`, ~5.5 days per
   20B tokens, least contended, needs the arm64 image) or a 4-GPU Blackwell node once online. 100B tokens is ~11
   A100-node-days — see [CLUSTER_FACTS.md](CLUSTER_FACTS.md) before promising it. There is no QOS or priority boost on

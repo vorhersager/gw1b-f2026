@@ -98,6 +98,42 @@ def test_dtype_auto_and_v100_attention_fallback(monkeypatch):
     assert jnp.allclose(decoded, fallback, atol=5e-2, rtol=5e-2)
 
 
+def test_chunked_loss_remat_and_micro_batch():
+    """model.loss (chunked cross-entropy) and run.remat give the full computation's loss and gradients;
+    choose_micro_batch fits the micro-batch to the GPU memory."""
+    from gw1b.budget import activation_bytes_per_seq, choose_micro_batch
+    from gw1b.config import TrainConfig, OptimConfig, RunConfig, DataConfig
+    toks = jax.random.randint(jax.random.key(1), (3, 64), 0, 512)
+    tg = jnp.roll(toks, -1, axis=1)
+    model = GW1BModel(ModelConfig(**TINY), rngs=nnx.Rngs(0))
+    lf, gf = nnx.value_and_grad(lambda m: cross_entropy(m(toks), tg))(model)
+    lc, gc = nnx.value_and_grad(lambda m: m.loss(toks, tg, chunk=16))(model)
+    assert abs(float(lf) - float(lc)) < 1e-5
+    assert max(jax.tree.leaves(jax.tree.map(lambda a, b: float(jnp.max(jnp.abs(a - b))), gf, gc))) < 1e-6
+    mask = (toks % 3 == 0)
+    assert abs(float(model.loss(toks, tg, mask=mask, chunk=16)) - float(cross_entropy(model(toks), tg, mask))) < 1e-5
+    rem = GW1BModel(ModelConfig(**TINY), rngs=nnx.Rngs(0), remat=True)
+    lr, gr = nnx.value_and_grad(lambda m: m.loss(toks, tg, chunk=16))(rem)
+    assert abs(float(lr) - float(lf)) < 1e-5
+    assert max(jax.tree.leaves(jax.tree.map(lambda a, b: float(jnp.max(jnp.abs(a - b))), gf, gr))) < 1e-6
+
+    class FakeV100:  # 16 GB, JAX reports the 75 % the allocator may use
+        device_kind = "Tesla V100-SXM2-16GB"
+        def memory_stats(self):
+            return {"bytes_limit": int(0.75 * 16e9)}
+    m50 = ModelConfig(vocab_size=32000, d_model=512, n_layers=12, n_heads=8, n_kv_heads=2, head_dim=64, d_ff=1408,
+                      max_seq_len=2048, dtype="float32")
+    cfg = TrainConfig(model=m50, data=DataConfig(seq_len=2048), optim=OptimConfig(), run=RunConfig(batch_size=128))
+    micro, ga, why = choose_micro_batch(cfg, "xla", 1, 1, device=FakeV100())
+    assert micro * ga == 128 and 1 <= micro <= 32, (micro, ga, why)
+    assert activation_bytes_per_seq(m50, 2048, "float32", "xla", True, 512) < activation_bytes_per_seq(m50, 2048, "float32", "xla", False, 512)
+    assert activation_bytes_per_seq(m50, 2048, "float32", "xla", False, 512) < activation_bytes_per_seq(m50, 2048, "float32", "xla", False, 0)
+    cfg2 = TrainConfig(model=m50, data=DataConfig(seq_len=2048), optim=OptimConfig(grad_accum=4), run=RunConfig(batch_size=128))
+    assert choose_micro_batch(cfg2, "xla", 2, 2, device=FakeV100())[:2] == (16, 4)   # explicit grad_accum, 2 devices
+    assert load_config(None, ["optim.grad_accum=auto"]).optim.grad_accum is None
+    assert load_config(None, ["model.dtype=auto"]).model.dtype == "auto"
+
+
 def test_sharded_training_step_reduces_loss():
     from jax.sharding import AxisType, NamedSharding, PartitionSpec as P
     import optax

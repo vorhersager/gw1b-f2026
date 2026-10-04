@@ -30,7 +30,8 @@ them in `$GW1B_SCRATCH/teams/team<N>/runs` (`--set run.out_dir=…`).
 
 * Optimizer/schedule knobs: `optim.lr`, `optim.warmup_steps`, `optim.schedule=cosine|wsd|linear|constant`,
   `optim.min_lr_ratio`, `optim.decay_fraction` (WSD), `optim.beta1/beta2/eps`, `optim.weight_decay`, `optim.grad_clip`,
-  `optim.grad_accum` (effective batch), `run.batch_size`, `data.seq_len`, `model.dtype`. New optimizers: one line in
+  `run.batch_size` (the global batch; `optim.grad_accum` is chosen automatically from the GPU memory, `run.remat` and
+  `run.loss_chunk` trade compute for memory), `data.seq_len`, `model.dtype`. New optimizers: one line in
   `train.py:build_optimizer` (anything in `optax`).
 * Throughput work: `run.profile=true` writes a JAX profiler trace (`<run>/profile`, open in TensorBoard); watch `perf/mfu`.
   Compare `attn_implementation`, batch sizes, `XLA_FLAGS`, single vs multi-node.

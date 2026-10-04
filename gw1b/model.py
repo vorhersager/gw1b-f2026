@@ -192,11 +192,21 @@ class Attention(nnx.Module):
         on Ampere and newer, and the whole jitted program fails to compile on a V100. Those GPUs emulate bf16
         in f32 anyway, so doing the attention in f32 there costs nothing (the scores are f32 in both cases).
         """
-        if implementation == "xla" and q.dtype == jnp.bfloat16 and not xla_bf16_dot_supported():
-            f32 = jnp.float32
-            out = jax.nn.dot_product_attention(q.astype(f32), k.astype(f32), v.astype(f32), implementation="xla", **kw)
-            return out.astype(q.dtype)
-        return jax.nn.dot_product_attention(q, k, v, implementation=implementation, **kw)
+        if implementation != "xla":
+            return jax.nn.dot_product_attention(q, k, v, implementation=implementation, **kw)
+        f32_fallback = q.dtype == jnp.bfloat16 and not xla_bf16_dot_supported()
+
+        def core(q, k, v):
+            if f32_fallback:
+                f32 = jnp.float32
+                out = jax.nn.dot_product_attention(q.astype(f32), k.astype(f32), v.astype(f32), implementation="xla", **kw)
+                return out.astype(q.dtype)
+            return jax.nn.dot_product_attention(q, k, v, implementation="xla", **kw)
+
+        # The XLA path materialises the [B, N, T, S] scores. Without remat every layer keeps them for the backward
+        # pass: N*T*T*8 bytes per layer and sequence in f32, i.e. 1.6 GB per sequence for the 50m config on a V100.
+        # jax.checkpoint recomputes them in the backward pass instead (~1/3 of the attention FLOPs extra).
+        return jax.checkpoint(core)(q, k, v)
 
     def __call__(self, x, cos, sin, *, cache=None, pos=None, valid=None, impl="xla"):
         B, T, _ = x.shape
@@ -259,10 +269,12 @@ class Block(nnx.Module):
 class GW1BModel(nnx.Module):
     """Decoder-only LM. `model(tokens)` -> logits [B, T, vocab] in float32."""
 
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs, n_shards: int = 1, attn_impl: str = "xla"):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs, n_shards: int = 1, attn_impl: str = "xla",
+                 remat: bool = False):
         cfg = resolve_dtype(cfg)  # "auto" -> bfloat16 / float32 for this machine; model.cfg.dtype is always concrete
         self.cfg = cfg
         self.attn_impl = attn_impl
+        self.remat = remat  # gradient checkpointing per block: store only block inputs, recompute the rest in backward
         dtype, pdtype = DTYPES[cfg.dtype], DTYPES[cfg.param_dtype]
         self.embed = nnx.Embed(cfg.vocab_size, cfg.d_model, dtype=dtype, param_dtype=pdtype,
                                embedding_init=_normal(cfg.init_std, (cfg.vocab_size, cfg.d_model), n_shards),
@@ -284,7 +296,18 @@ class GW1BModel(nnx.Module):
         """Training/eval: model(tokens) -> logits.  Decoding: model(tokens, cache=, pos=, valid=) -> (logits, cache).
 
         valid: optional [B, cache_len] bool mask marking real (non-padding) cache positions (left padding).
+        For training use `loss()`: it never materialises the full [B, T, vocab] logits.
         """
+        if cache is None:
+            return shard_activations(self.logits(self.hidden(tokens)))
+        x, new_caches = self._forward(tokens, cache=cache, pos=pos, valid=valid)
+        return shard_activations(self.logits(x)), new_caches
+
+    def hidden(self, tokens: jax.Array) -> jax.Array:
+        """Final (normalised) hidden states [B, T, d] — everything but the output projection."""
+        return self._forward(tokens)[0]
+
+    def _forward(self, tokens, *, cache=None, pos=None, valid=None):
         cfg = self.cfg
         B, T = tokens.shape
         compute_dtype = DTYPES[cfg.dtype]
@@ -298,22 +321,34 @@ class GW1BModel(nnx.Module):
             cos = jnp.ones((T, cfg.head_dim), compute_dtype)
             sin = jnp.zeros((T, cfg.head_dim), compute_dtype)
         new_caches = []
+        impl = self.attn_impl
         for i, block in enumerate(self.blocks):
-            x, c = block(x, cos, sin, cache=None if cache is None else cache[i], pos=pos, valid=valid,
-                         impl=self.attn_impl)
+            if cache is None and self.remat:
+                # modules are pytrees: jax.checkpoint stores only this block's input and recomputes its activations
+                x = jax.checkpoint(lambda blk, x_, c_, s_: blk(x_, c_, s_, impl=impl)[0])(block, x, cos, sin)
+                c = None
+            else:
+                x, c = block(x, cos, sin, cache=None if cache is None else cache[i], pos=pos, valid=valid, impl=impl)
             new_caches.append(c)
-        x = self.final_norm(x)
-        logits = shard_activations(self.logits(x))
-        return logits if cache is None else (logits, new_caches)
+        return self.final_norm(x), new_caches
+
+    def output_matrix(self) -> jax.Array:
+        """The [vocab, d] output projection in the compute dtype (the tied embedding or lm_head)."""
+        compute_dtype = DTYPES[self.cfg.dtype]
+        if self.cfg.tie_embeddings:
+            return self.embed.embedding[...].astype(compute_dtype)          # [V, d]
+        return self.lm_head.kernel[...].astype(compute_dtype).T             # [d, V] -> [V, d]
 
     def logits(self, x: jax.Array) -> jax.Array:
         """Project hidden states to vocabulary logits in float32 (numerically important for the loss)."""
-        compute_dtype = DTYPES[self.cfg.dtype]
-        if self.cfg.tie_embeddings:
-            w = self.embed.embedding[...].astype(compute_dtype)  # [V, d]
-            return jnp.einsum("btd,vd->btv", x, w, preferred_element_type=jnp.float32)
-        w = self.lm_head.kernel[...].astype(compute_dtype)  # [d, V]
-        return jnp.einsum("btd,dv->btv", x, w, preferred_element_type=jnp.float32)
+        return jnp.einsum("btd,vd->btv", x, self.output_matrix(), preferred_element_type=jnp.float32)
+
+    def loss(self, tokens: jax.Array, targets: jax.Array, mask: jax.Array | None = None, chunk: int = 512) -> jax.Array:
+        """Mean next-token cross-entropy, computed `chunk` positions at a time so the [B, T, vocab] f32 logits
+        (0.26 GB per 2048-token sequence at vocab 32000, times three with log-softmax and its gradient) never exist
+        in full. chunk=0 materialises everything (same numbers, 3x the memory).
+        """
+        return chunked_cross_entropy(self.hidden(tokens), self.output_matrix(), targets, mask, chunk)
 
     def init_cache(self, batch_size: int, max_len: int, dtype: Any = None) -> list[dict[str, jax.Array]]:
         cfg = self.cfg
@@ -343,6 +378,38 @@ def resolve_attn_impl(cfg: ModelConfig) -> str:
     ampere_or_newer = any(k in kind for k in ("a100", "a10", "a30", "a40", "l40", "l4", "h100", "h200", "gh200",
                                                "b200", "rtx 30", "rtx 40", "rtx 50", "rtx a", "rtx 6000"))
     return "cudnn" if ampere_or_newer else "xla"
+
+
+def chunked_cross_entropy(x: jax.Array, w: jax.Array, targets: jax.Array, mask: jax.Array | None = None,
+                          chunk: int = 512) -> jax.Array:
+    """Cross-entropy of the next-token prediction x @ w.T without materialising [B, T, V] logits.
+
+    x: [B, T, d] hidden states, w: [V, d] output matrix, targets [B, T] int, mask [B, T] (1 = count, None = all).
+    The sequence is split into chunks; each chunk's logits, log-softmax and gradient are computed inside
+    jax.checkpoint, so only one chunk's worth is live at a time (forward and backward). Falls back to the
+    full computation when chunk <= 0 or T is not a multiple of chunk.
+    """
+    B, T, _ = x.shape
+    if chunk <= 0 or T % chunk or T == chunk:
+        return cross_entropy(jnp.einsum("btd,vd->btv", x, w, preferred_element_type=jnp.float32), targets, mask)
+    n = T // chunk
+    xs = x.reshape(B, n, chunk, -1).transpose(1, 0, 2, 3)          # [n, B, chunk, d]
+    ts = targets.reshape(B, n, chunk).transpose(1, 0, 2)           # [n, B, chunk]
+    ms = None if mask is None else mask.reshape(B, n, chunk).transpose(1, 0, 2).astype(jnp.float32)
+
+    @jax.checkpoint
+    def one(carry, inputs):
+        x_c, t_c, m_c = inputs
+        logits = jnp.einsum("bcd,vd->bcv", x_c, w, preferred_element_type=jnp.float32)
+        logp = jax.nn.log_softmax(logits, axis=-1)
+        nll = -jnp.take_along_axis(logp, t_c[..., None], axis=-1)[..., 0]
+        if m_c is not None:
+            nll = nll * m_c
+        return carry + nll.sum(), None
+
+    total, _ = jax.lax.scan(one, jnp.zeros((), jnp.float32), (xs, ts, ms))
+    count = float(B * T) if mask is None else jnp.maximum(mask.astype(jnp.float32).sum(), 1.0)
+    return total / count
 
 
 def cross_entropy(logits: jax.Array, targets: jax.Array, mask: jax.Array | None = None) -> jax.Array:

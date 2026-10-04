@@ -92,7 +92,7 @@ class OptimConfig:
     eps: float = 1e-8
     weight_decay: float = 0.1
     grad_clip: float = 1.0
-    grad_accum: int = 1          # micro-steps per optimizer step
+    grad_accum: int | None = None  # micro-steps per optimizer step; None/auto = the largest micro-batch that fits the GPU
     decay_norm_and_bias: bool = False  # apply weight decay to 1-D params? (Llama recipes: no)
 
 
@@ -111,6 +111,8 @@ class RunConfig:
     ckpt_keep_every: int | None = None  # additionally keep every N-th step forever (Team 5 checkpoint studies)
     seed: int = 0
     shard_params: bool = True    # FSDP: shard parameters + optimizer state across GPUs
+    remat: bool = False          # gradient checkpointing per block: ~4x less activation memory, ~30 % more compute
+    loss_chunk: int = 512        # positions per chunk of the memory-efficient cross-entropy (0 = full [B,T,V] logits)
     profile: bool = False        # write a JAX profiler trace for the first steps
     wandb: bool = False          # log to Weights & Biases (needs WANDB_API_KEY; use WANDB_MODE=offline on compute nodes)
     tensorboard: bool = True
@@ -161,8 +163,11 @@ def _coerce(value: Any, target_type: Any) -> Any:
     Strings are coerced because PyYAML reads `3e-4` as a string and the CLI always gives strings.
     """
     t = _base_type(target_type)
+    optional = isinstance(target_type, types.UnionType) and type(None) in target_type.__args__
     if value is None or (isinstance(value, str) and value.strip().lower() in ("none", "null", "")):
         return None
+    if optional and isinstance(value, str) and value.strip().lower() == "auto":
+        return None  # e.g. optim.grad_accum: auto
     if t is bool:
         if isinstance(value, str):
             return value.strip().lower() in ("1", "true", "yes", "on")
@@ -276,7 +281,9 @@ def _validate(cfg: TrainConfig) -> None:
     assert m.param_dtype in ("float32", "bfloat16", "float16"), f"model.param_dtype={m.param_dtype!r}"
     assert m.attn_implementation in ("auto", "xla", "cudnn"), f"model.attn_implementation={m.attn_implementation!r}"
     assert cfg.data.seq_len <= m.max_seq_len, "data.seq_len must be <= model.max_seq_len"
-    assert cfg.run.batch_size % cfg.optim.grad_accum == 0, "batch_size must be divisible by grad_accum"
+    if cfg.optim.grad_accum:
+        assert cfg.run.batch_size % cfg.optim.grad_accum == 0, "batch_size must be divisible by grad_accum"
+    assert cfg.run.loss_chunk >= 0
     assert cfg.optim.schedule in ("cosine", "wsd", "constant", "linear")
 
 
@@ -287,7 +294,8 @@ def config_summary(cfg: TrainConfig) -> str:
         f"L={m.n_layers} d={m.d_model} heads={m.n_heads}/{m.n_kv_heads}kv ff={m.d_ff} vocab={m.vocab_size} "
         f"ctx={cfg.data.seq_len} {m.activation}/{m.norm}/{m.pos} tie={m.tie_embeddings} dtype={m.dtype}",
         f"optim: {cfg.optim.name} lr={cfg.optim.lr} {cfg.optim.schedule} warmup={cfg.optim.warmup_steps} "
-        f"wd={cfg.optim.weight_decay} clip={cfg.optim.grad_clip} accum={cfg.optim.grad_accum}",
+        f"wd={cfg.optim.weight_decay} clip={cfg.optim.grad_clip} accum={cfg.optim.grad_accum or 'auto'}"
+        f"{' remat' if cfg.run.remat else ''}",
         f"run:   batch={cfg.run.batch_size} seqs x {cfg.data.seq_len} = {cfg.tokens_per_step:,} tokens/step, "
         f"{cfg.resolved_total_steps():,} steps = {cfg.resolved_total_steps()*cfg.tokens_per_step/1e9:.2f}B tokens",
     ]

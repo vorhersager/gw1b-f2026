@@ -50,8 +50,8 @@ fine. Tensor parallelism would not be; we do not use it. `shard_params: false` (
 optimizer state fit in 80 GB) is a knob to test in the pilot. There are only 16 A100s for the whole university and
 they run around the clock: queue early, checkpoint often (`ckpt_every: 500`), chain **1-day** jobs (8-GPU jobs
 dequeued within 2 days in September; longer jobs wait longer), and be able to run on 4 GPUs — `--gpus 4 --gpu-type
-a100 --one-socket` gets the four GPUs of one socket (two NVLink pairs, one NUMA domain) with `--set optim.grad_accum=2`
-to keep the 1M-token global batch.
+a100 --one-socket` gets the four GPUs of one socket (two NVLink pairs, one NUMA domain); `run.batch_size` is the global
+batch, so the 1M-token step is kept automatically (`optim.grad_accum: auto` doubles the accumulation).
 
 **RTX PRO 6000 Blackwell 96 GB (from October; 2 × 4-GPU + 4 × 2-GPU nodes)** — spec sheet 1 PFLOP/s FP16 tensor
 (sparse), so ~500 TFLOP/s dense ≈ 1.6 × A100, 96 GB, PCIe 5 only, GDDR7. Once online they are a real alternative

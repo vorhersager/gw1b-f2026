@@ -45,6 +45,72 @@ def peak_flops(device_kind: str, dtype: str = "bfloat16") -> float | None:
     return tc * 1e12
 
 
+def gpu_memory_bytes(device_kind: str) -> float | None:
+    """Total memory of a GPU from the table (fallback when JAX cannot report it)."""
+    key = gpu_key(device_kind)
+    return None if key is None else GPU_PEAK_TFLOPS[key][2] * 1e9
+
+
+def activation_bytes_per_seq(m, seq_len: int, dtype: str, attn_impl: str, remat: bool, loss_chunk: int) -> float:
+    """Rough activation memory one training sequence needs (bytes), for choosing the micro-batch.
+
+    m: ModelConfig. Counts what the backward pass has to keep: the block activations (or only the block
+    inputs with remat), one layer's attention scores on the XLA path (they are rematerialised, so one layer
+    at a time), and the f32 logits of one loss chunk (logits + log-softmax + gradient).
+    """
+    db = 2 if dtype in ("bfloat16", "float16") else 4
+    T, V, d, L, N, ff = seq_len, m.vocab_size, m.d_model, m.n_layers, m.n_heads, m.d_ff
+    per_layer = T * (10 * d + 3 * ff) * db                      # norms, q/k/v/o, residuals, gate/up/silu
+    blocks = L * T * d * db + per_layer if remat else L * per_layer
+    scores = 0.0 if attn_impl == "cudnn" else N * T * T * (8 + db)   # f32 scores + grad + probs, one layer live
+    chunk = loss_chunk if 0 < loss_chunk < T else T
+    logits = 3.0 * chunk * V * 4
+    return blocks + scores + logits
+
+
+def choose_micro_batch(cfg, attn_impl: str, n_devices: int, n_shards: int, device=None) -> tuple[int, int, str]:
+    """(sequences per device per micro-step, grad_accum, explanation) for cfg.run.batch_size on n_devices.
+
+    optim.grad_accum set -> honoured. Otherwise the largest divisor of the per-device batch whose estimated
+    activation memory fits what XLA may allocate on the device (JAX's memory_stats or the GPU table).
+    """
+    import jax
+    m, batch, T = cfg.model, cfg.run.batch_size, cfg.data.seq_len
+    assert batch % n_devices == 0, f"run.batch_size={batch} must be a multiple of the {n_devices} devices"
+    per_dev = batch // n_devices
+    if cfg.optim.grad_accum:
+        ga = cfg.optim.grad_accum
+        assert per_dev % ga == 0, f"batch_size/n_devices={per_dev} must be divisible by optim.grad_accum={ga}"
+        return per_dev // ga, ga, f"optim.grad_accum={ga} from the config"
+    dev = device or jax.local_devices()[0]
+    limit = None
+    try:
+        limit = dev.memory_stats().get("bytes_limit")
+    except Exception:
+        limit = None
+    if not limit:
+        total = gpu_memory_bytes(dev.device_kind)
+        limit = 0.75 * total if total else None
+    if not limit:  # CPU or unknown accelerator: no memory model, one micro-step
+        return per_dev, 1, f"no memory information for {dev.device_kind}: one micro-step"
+    dtype = m.dtype if m.dtype != "auto" else "float32"
+    n_params = m.n_params
+    static = n_params * 24.0 / max(1, n_shards) + n_params * 4.0 + 1.0e9   # f32 master + grad + Adam, cast copy, XLA workspace
+    per_seq = activation_bytes_per_seq(m, T, dtype, attn_impl, cfg.run.remat, cfg.run.loss_chunk)
+    usable = max(0.0, (limit - static) * 0.85)
+    fit = max(1, int(usable // per_seq))
+    micro = max(d for d in range(1, per_dev + 1) if per_dev % d == 0 and d <= fit)
+    why = (f"auto: {limit/1e9:.0f} GB usable on {dev.device_kind}, ~{static/1e9:.1f} GB for parameters/optimizer, "
+           f"~{per_seq/1e9:.2f} GB per sequence -> up to {fit} per device")
+    if per_seq > usable:
+        if static > 0.6 * limit:
+            why += (f" — even one sequence may not fit: parameters + optimizer state alone take ~{static/1e9:.1f} GB; "
+                    f"use more GPUs (--gpus 4: FSDP shards them) or a bigger GPU (--gpu-type a100)")
+        else:
+            why += " — even one sequence may not fit: try --set run.remat=true, a shorter data.seq_len or more GPUs"
+    return micro, per_dev // micro, why
+
+
 def flops_per_token(n_params: int, n_layers: int, seq_len: int, d_model: int) -> float:
     """6N (fwd+bwd matmuls) + 12·L·T·d (attention scores, fwd+bwd)."""
     return 6.0 * n_params + 12.0 * n_layers * seq_len * d_model

@@ -27,7 +27,7 @@ optim:
   beta2: 0.95
   weight_decay: 0.1
   grad_clip: 1.0
-  grad_accum: 1
+  grad_accum: auto           # micro-batch per GPU chosen from its memory; the 512-sequence batch is kept by accumulation
 run:
   name: gw1b-base
   out_dir: ${GW1B_SCRATCH}/checkpoints

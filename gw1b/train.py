@@ -16,6 +16,7 @@ What it does
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import math
 import os
@@ -30,7 +31,7 @@ import optax
 from flax import nnx
 
 from . import checkpoint as ckpt_lib
-from .budget import flops_per_token, peak_flops
+from .budget import choose_micro_batch, flops_per_token, peak_flops
 from .config import OptimConfig, TrainConfig, config_summary, load_config, save_config
 from .data import BatchLoader, TokenDataset
 from .model import count_params, cross_entropy
@@ -58,7 +59,7 @@ def lr_schedule(o: OptimConfig, total_steps: int) -> optax.Schedule:
     raise ValueError(o.schedule)
 
 
-def build_optimizer(o: OptimConfig, total_steps: int) -> tuple[optax.GradientTransformation, optax.Schedule]:
+def build_optimizer(o: OptimConfig, total_steps: int, grad_accum: int = 1) -> tuple[optax.GradientTransformation, optax.Schedule]:
     sched = lr_schedule(o, total_steps)
 
     def decay_mask(params):  # weight decay on matrices/embeddings only, not on norm scales / biases
@@ -75,19 +76,18 @@ def build_optimizer(o: OptimConfig, total_steps: int) -> tuple[optax.GradientTra
         raise ValueError(f"unknown optimizer {o.name!r} (add it in gw1b/train.py:build_optimizer)")
     parts = [optax.clip_by_global_norm(o.grad_clip)] if o.grad_clip and o.grad_clip > 0 else []
     tx = optax.chain(*parts, core)
-    if o.grad_accum > 1:
-        tx = optax.MultiSteps(tx, every_k_schedule=o.grad_accum)
+    if grad_accum > 1:
+        tx = optax.MultiSteps(tx, every_k_schedule=grad_accum)
     return tx, sched
 
 
 # ---------------------------------------------------------------------------
 # steps
 # ---------------------------------------------------------------------------
-@nnx.jit
-def train_step(model, optimizer, batch):
+@functools.partial(nnx.jit, static_argnames=("loss_chunk",))
+def train_step(model, optimizer, batch, loss_chunk: int = 512):
     def loss_fn(model):
-        logits = model(batch["inputs"])
-        return cross_entropy(logits, batch["targets"])
+        return model.loss(batch["inputs"], batch["targets"], chunk=loss_chunk)  # never builds the full [B,T,V] logits
 
     loss, grads = nnx.value_and_grad(loss_fn)(model)
     grad_norm = optax.global_norm(grads)
@@ -95,17 +95,17 @@ def train_step(model, optimizer, batch):
     return loss, grad_norm
 
 
-@nnx.jit
-def eval_step(model, batch):
-    return cross_entropy(model(batch["inputs"]), batch["targets"])
+@functools.partial(nnx.jit, static_argnames=("loss_chunk",))
+def eval_step(model, batch, loss_chunk: int = 512):
+    return model.loss(batch["inputs"], batch["targets"], chunk=loss_chunk)
 
 
-def evaluate(model, dataset: TokenDataset, cfg: TrainConfig, mesh, n_batches: int) -> float:
-    micro = cfg.run.batch_size // cfg.optim.grad_accum
+def evaluate(model, dataset: TokenDataset, cfg: TrainConfig, mesh, n_batches: int, micro: int | None = None) -> float:
+    micro = micro or cfg.run.batch_size // (cfg.optim.grad_accum or 1)
     loader = BatchLoader(dataset, micro, seed=0, shuffle=False, rank=jax.process_index(), world=jax.process_count(),
                          prefetch=2, num_workers=1)
     n = min(n_batches, max(1, dataset.n_windows // micro))
-    losses = [eval_step(model, put_batch(next(loader), mesh)) for _ in range(n)]
+    losses = [eval_step(model, put_batch(next(loader), mesh), loss_chunk=cfg.run.loss_chunk) for _ in range(n)]
     loader.close()
     return float(jnp.mean(jnp.stack(losses)))
 
@@ -188,13 +188,18 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
     # ---- model / optimizer -------------------------------------------------
     t0 = time.time()
     model = create_model(cfg, mesh)
-    tx, sched = build_optimizer(cfg.optim, total_steps)
+    micro_dev, grad_accum, how = choose_micro_batch(cfg, model.attn_impl, n_devices,
+                                                    n_devices if cfg.run.shard_params else 1)
+    micro = micro_dev * n_devices                      # sequences per micro-step across the mesh
+    tx, sched = build_optimizer(cfg.optim, total_steps, grad_accum)
     with jax.set_mesh(mesh):
         optimizer = nnx.Optimizer(model, tx, wrt=nnx.Param)
     n_params = count_params(model)
     if is_main:
         print(f"[train] model created in {time.time() - t0:.1f}s: {n_params/1e6:,.1f}M params, "
-              f"attention={model.attn_impl}, params sharded={cfg.run.shard_params}")
+              f"attention={model.attn_impl}, params sharded={cfg.run.shard_params}, remat={cfg.run.remat}")
+        print(f"[train] micro-batch: {micro_dev} seq/device x {n_devices} device(s), grad_accum={grad_accum} "
+              f"-> {cfg.run.batch_size} seq/step  ({how})")
 
     # ---- checkpoints / resume ----------------------------------------------
     mgr = ckpt_lib.make_manager(ckpt_dir, cfg.run.ckpt_every, cfg.run.ckpt_keep, cfg.run.ckpt_keep_every)
@@ -222,9 +227,8 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
         except (FileNotFoundError, ValueError) as e:
             if is_main:
                 print(f"[train] no validation data ({e}); skipping eval")
-    micro = cfg.run.batch_size // cfg.optim.grad_accum
     loader = BatchLoader(train_ds, micro, seed=cfg.data.seed, shuffle=cfg.data.shuffle, rank=jax.process_index(),
-                         world=jax.process_count(), start_step=step * cfg.optim.grad_accum,
+                         world=jax.process_count(), start_step=step * grad_accum,
                          prefetch=cfg.data.prefetch, num_workers=cfg.data.num_workers)
     if is_main:
         print(f"[train] train data: {train_ds.total_tokens/1e9:.3f}B tokens in {len(train_ds.files)} shard(s), "
@@ -247,9 +251,9 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
             if cfg.run.profile and step == first_step + 5 and is_main:
                 jax.profiler.start_trace(os.path.join(run_dir, "profile"))
             losses, gnorms = [], []
-            for _ in range(cfg.optim.grad_accum):
+            for _ in range(grad_accum):
                 batch = put_batch(next(loader), mesh)
-                loss, gnorm = train_step(model, optimizer, batch)
+                loss, gnorm = train_step(model, optimizer, batch, loss_chunk=cfg.run.loss_chunk)
                 losses.append(loss)
                 gnorms.append(gnorm)
             step += 1
@@ -282,7 +286,7 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
                 t_log, tokens_log = now, tokens_seen
 
             if val_ds is not None and cfg.run.eval_every and (step % cfg.run.eval_every == 0 or step == total_steps):
-                val_loss = evaluate(model, val_ds, cfg, mesh, cfg.run.eval_batches)
+                val_loss = evaluate(model, val_ds, cfg, mesh, cfg.run.eval_batches, micro)
                 logger.log(step, {"val/loss": val_loss, "val/ppl": math.exp(min(val_loss, 20)), "tokens_seen": tokens_seen})
                 if is_main:
                     print(f"[train] step {step} val loss {val_loss:.4f} (ppl {math.exp(min(val_loss, 20)):.1f})", flush=True)
@@ -310,6 +314,7 @@ def train(cfg: TrainConfig, resume: bool = True) -> dict[str, Any]:
         "run": cfg.run.name, "finished": step >= total_steps, "step": step, "tokens": tokens_seen,
         "n_params": n_params, "flops": fpt * tokens_seen, "gpu_hours": gpu_hours, "gpu_kind": jax.devices()[0].device_kind,
         "n_devices": n_devices, "usd_equivalent": gpu_hours * cfg.run.gpu_hour_price_usd,
+        "micro_batch_per_device": micro_dev, "grad_accum": grad_accum,
         "train_loss": last_loss, "val_loss": val_loss,
         "val_ppl": math.exp(min(val_loss, 20)) if not math.isnan(val_loss) else None,
         "train_seconds": train_seconds, "checkpoint_dir": ckpt_dir,

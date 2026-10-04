@@ -69,7 +69,7 @@ def create_model(cfg: TrainConfig, mesh: Mesh, seed: int | None = None) -> GW1BM
     with jax.set_mesh(mesh):
         @nnx.jit
         def _create():
-            model = GW1BModel(cfg.model, rngs=nnx.Rngs(seed), n_shards=n_shards, attn_impl=attn_impl)
+            model = GW1BModel(cfg.model, rngs=nnx.Rngs(seed), n_shards=n_shards, attn_impl=attn_impl, remat=cfg.run.remat)
             if n_shards == 1 and mesh.size > 1:  # pure data parallel: replicate parameters explicitly
                 state = nnx.state(model)
                 state = jax.tree.map(lambda x: jax.lax.with_sharding_constraint(x, P()), state)

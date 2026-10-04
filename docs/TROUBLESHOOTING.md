@@ -50,9 +50,13 @@ then run the notebook again from the top; `!nvidia-smi` in a cell shows who hold
 `GW1B (JAX)` kernel and the class notebooks now set `XLA_PYTHON_CLIENT_PREALLOCATE=false`, so kernels allocate on
 demand and several notebooks fit on one 16 GB V100 (a kernel still keeps what it has used until it is shut down).
 
-**`RESOURCE_EXHAUSTED: Out of memory`** — reduce `run.batch_size` (keep tokens/step by raising `optim.grad_accum`),
-shorten `data.seq_len`, make sure `run.shard_params=true`, or lower `XLA_PYTHON_CLIENT_MEM_FRACTION`. On 16 GB V100s a
-350M model needs batch ≤ 8 sequences of 2048 per GPU.
+**`RESOURCE_EXHAUSTED: Out of memory` / `Autotuning failed … Out of memory while trying to allocate 31.25GiB`** — the
+micro-batch does not fit the GPU. By default the trainer picks it (`optim.grad_accum: auto`: the log line
+`[train] micro-batch: 4 seq/device x 1 device(s), grad_accum=32 …` says what it chose and why) and the loss is computed
+in chunks so the `[batch, 2048, 32000]` f32 logits (33 GB for 128 sequences!) never exist in full. If it still runs out:
+`--set run.remat=true` (block-level gradient checkpointing, ~4x less activation memory for ~30 % more compute — the
+normal setting for 200m+ on 16 GB V100s), a larger explicit `--set optim.grad_accum=…`, a shorter `data.seq_len`, or
+`run.shard_params=true` across more GPUs. Do not raise `XLA_PYTHON_CLIENT_MEM_FRACTION` in Jupyter (other kernels share the GPU).
 
 **Very slow first step** — XLA compilation (30 s for a 50M model, several minutes for 1.15B). It is cached in
 `$JAX_COMPILATION_CACHE_DIR` on scratch, so the second run is fast. Do not put that cache in `$HOME` (25 GB quota).

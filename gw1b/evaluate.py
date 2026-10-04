@@ -37,11 +37,10 @@ def load_run(run_dir: str, step: int | None = None, overrides: list[str] | None 
 
 @nnx.jit
 def _loss_step(model, batch):
-    logits = model(batch["inputs"])
-    return cross_entropy(logits, batch["targets"])
+    return model.loss(batch["inputs"], batch["targets"])   # chunked: no full [B, T, vocab] logits
 
 
-def eval_loss(model: GW1BModel, data_dir: str, seq_len: int, batch_size: int = 16, n_batches: int = 50) -> dict:
+def eval_loss(model: GW1BModel, data_dir: str, seq_len: int, batch_size: int = 8, n_batches: int = 50) -> dict:
     ds = TokenDataset(data_dir, seq_len)
     mesh = make_mesh()
     loader = BatchLoader(ds, batch_size, shuffle=False, rank=jax.process_index(), world=jax.process_count(),
@@ -62,7 +61,7 @@ def main(argv=None):
     ap.add_argument("--step", type=int, default=None)
     ap.add_argument("--data", default=None, help="token-shard directory (default: the run's val_dir)")
     ap.add_argument("--batches", type=int, default=50)
-    ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--batch-size", type=int, default=8)
     a = ap.parse_args(argv)
     model, cfg, step = load_run(a.run, a.step)
     data = a.data or cfg.data.val_dir

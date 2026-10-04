@@ -45,6 +45,11 @@ release ──export_hf──▶ $GW1B_GROUP/release/GW-1B-Base/{model.safetenso
   and loss in f32, AdamW moments f32.
 * Attention: cuDNN flash attention on Ampere+ (`attn_implementation=auto`), XLA elsewhere; identical math. On a
   V100 the XLA path computes the scores in f32 (XLA:GPU has no bf16 dot algorithm before Ampere).
+* Memory: `run.batch_size` is the global batch; the trainer picks the per-GPU micro-batch from the GPU's memory
+  (`optim.grad_accum: auto`, `budget.choose_micro_batch`) and accumulates the rest. The loss is computed `run.loss_chunk`
+  positions at a time (`model.loss`), so the f32 `[batch, T, vocab]` logits never exist in full (1 GB per sequence
+  otherwise); the XLA attention path rematerialises its `[N, T, T]` scores in the backward pass; `run.remat=true` adds
+  block-level gradient checkpointing (the setting for 200m+ on 16 GB V100s).
 * RoPE uses the Hugging Face "rotate-half" layout, so exported weights need no permutation; `export_hf.verify`
   checks log-prob agreement with `transformers` on CPU (the tests show a max difference of 0.0000 in f32).
 * Weight decay is applied to matrices only (norm scales / biases excluded), init N(0, 0.02) with 1/√(2L) scaling
