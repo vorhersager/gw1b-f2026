@@ -284,6 +284,9 @@ def main(argv=None) -> None:
     ap.add_argument("--tile", type=int, default=48, help="max cells per side of a weight tile (default 48)")
     ap.add_argument("--out", default=None, help="JSON output (default: <run>/viz/step-<N>.json)")
     ap.add_argument("--html", default=None, help="also write a self-contained HTML page")
+    ap.add_argument("--prompt", default=None, help="also record an animated completion of this prompt (needs the run's tokenizer)")
+    ap.add_argument("--max-new", type=int, default=32)
+    ap.add_argument("--temperature", type=float, default=0.0)
     a = ap.parse_args(argv)
     compare: int | None | str = a.compare
     if isinstance(compare, str) and compare.lower() in ("none", "no", ""):
@@ -291,6 +294,14 @@ def main(argv=None) -> None:
     elif isinstance(compare, str) and compare.isdigit():
         compare = int(compare)
     data = export_run(a.run, a.step, compare, a.tile)
+    if a.prompt is not None:
+        from ..tokenizer import Tokenizer
+        from .trace import NumpyModel, trace_generate
+        cfg = load_config(os.path.join(a.run, "config.yaml"))
+        model = NumpyModel(load_params(a.run, data["step"]), cfg.model)
+        data["generation"] = trace_generate(model, Tokenizer(cfg.data.tokenizer), a.prompt, a.max_new, a.temperature)
+        print(f"[viz] completion ({len(data['generation']['steps'])} tokens, {data['generation']['seconds']}s): "
+              f"{a.prompt!r} -> {data['generation']['completion']!r}")
     out = a.out or os.path.join(a.run, "viz", f"step-{data['step']}.json")
     write_json(data, out)
     print(f"[viz] {data['run']} step {data['step']} ({data['n_params']/1e6:.1f}M params, {len(data['tensors'])} tensors, "

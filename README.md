@@ -150,7 +150,7 @@ The `gw1b` Python package (JAX 0.10 · Flax NNX · Optax · Orbax · SentencePie
 | `gw1b.lm_eval_adapter` | HellaSwag, ARC, PIQA, Winogrande, MMLU, GSM8K, … on the JAX model through lm-evaluation-harness |
 | `gw1b.export_hf` | checkpoint → `LlamaForCausalLM` safetensors, verified against `transformers` |
 | `gw1b.budget` | FLOPs → GPU-hours → wall-clock → $ for any config and GPU type |
-| `gw1b.viz` | interactive 3D visualizer of the architecture with the weights of any checkpoint, refreshing as a run trains (`gw1b viz`; [docs/VISUALIZER.md](docs/VISUALIZER.md)) |
+| `gw1b.viz` | interactive 3D visualizer: the architecture with the weights of any checkpoint and the data flow between them, refreshing as a run trains, plus an animated forward pass of any prompt (`gw1b viz`; [docs/VISUALIZER.md](docs/VISUALIZER.md)) |
 
 Configs: `configs/tiny_debug.yaml` (runs in a minute anywhere), the scaling ladder `50m` / `100m` / `200m` / `350m`,
 and `gw1b_1p15b.yaml` — the design-document architecture (32 layers, d = 1792, 28 heads / 7 KV heads, SwiGLU 4864,

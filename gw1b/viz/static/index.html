@@ -30,6 +30,16 @@
   #info td { padding: 1px 0; } #info td:last-child { text-align: right; font-family: ui-monospace, Menlo, monospace; }
   #info canvas { display: block; width: 100%; border-radius: 4px; background: #121722; margin-top: 6px; }
   #help { bottom: 12px; left: 12px; color: var(--muted); font-size: 11.5px; }
+  #gen { right: 12px; bottom: 12px; width: 360px; max-height: 60%; overflow: auto; }
+  #gen h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; } #gen h1 small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  #gen textarea { width: 100%; background: #161b25; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; resize: vertical; }
+  #gen label { min-width: 0; } #gen input[type=range] { width: 90px; }
+  #tokens { margin-top: 8px; line-height: 1.9; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; word-break: break-word; }
+  #tokens .tok { display: inline-block; padding: 0 3px; margin: 1px 1px; border-radius: 3px; background: rgba(111,179,255,0.0); border: 1px solid transparent; white-space: pre; }
+  #tokens .tok.gen { border-color: #2f3a4d; } #tokens .tok.cur { outline: 1px solid #ffb454; } #tokens .tok.eos { color: var(--muted); }
+  #topk { margin-top: 6px; } #topk .bar { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; margin: 1px 0; }
+  #topk .bar .t { width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: pre; } #topk .bar .b { height: 9px; background: #6fb3ff; border-radius: 2px; }
+  #topk .bar.chosen .b { background: #ffb454; } #topk .bar .p { color: var(--muted); width: 48px; text-align: right; }
   #help kbd { background: #1a2030; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .hint { color: var(--muted); font-size: 11.5px; }
 </style>
@@ -52,7 +62,8 @@
     </select></div>
   <div class="row"><label>scale</label>
     <select id="scale"><option value="tensor">per tensor</option><option value="global">global</option></select>
-    <label style="min-width:0"><input type="checkbox" id="labels" checked> labels</label></div>
+    <label style="min-width:0"><input type="checkbox" id="labels" checked> labels</label>
+    <label style="min-width:0"><input type="checkbox" id="connections" checked> connections</label></div>
   <div class="row"><label>spacing</label><input type="range" id="spacing" min="0.5" max="3" step="0.1" value="1">
     <button id="reset">reset view</button></div>
   <canvas id="legend" width="300" height="14"></canvas>
@@ -66,6 +77,23 @@
   <table id="itable"></table>
   <canvas id="ihist" width="276" height="70"></canvas>
   <canvas id="itile" width="276" height="276"></canvas>
+</div>
+
+<div id="gen" class="panel">
+  <h1>Run a prompt <small>animated forward pass</small></h1>
+  <textarea id="prompt" rows="2" placeholder="type a prompt, then Generate">The students trained a language model on</textarea>
+  <div class="row">
+    <label>tokens</label><input type="number" id="maxnew" value="24" min="1" max="256" style="width:62px">
+    <label>temp.</label><input type="number" id="temp" value="0" min="0" max="2" step="0.1" style="width:56px" title="0 = greedy">
+    <label>speed</label><input type="range" id="speed" min="40" max="800" step="20" value="220" title="ms per block">
+  </div>
+  <div class="row">
+    <button id="generate">Generate</button><button id="pause">Pause</button><button id="stepbtn" title="play one token">Step</button><button id="clear">Clear</button>
+    <span id="genstatus" class="hint"></span>
+  </div>
+  <div id="tokens"></div>
+  <div class="row" style="margin-top:6px"><span id="layerlbl" class="hint"></span></div>
+  <div id="topk"></div>
 </div>
 
 <div id="help" class="panel">drag: rotate · right-drag / shift-drag: pan · wheel: zoom · hover: details · click: focus · <kbd>r</kbd> reset</div>

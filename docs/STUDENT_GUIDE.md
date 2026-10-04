@@ -102,8 +102,10 @@ anywhere, not only from the node the job runs on.
   (`gw1b tensorboard <dir>` for another folder, e.g. your team's). Inside a notebook the same thing is
   `%load_ext tensorboard` then `%tensorboard --logdir $GW1B_SCRATCH/users/$USER/runs --port 6006 --bind_all`.
 * **The model itself, in 3D**: `gw1b viz` (with a Jupyter session open) → http://localhost:6007 — the architecture as a
-  tower of slabs coloured by the weights of any checkpoint, hover for statistics, *follow latest* reloads as the run
-  writes new checkpoints; **change since previous checkpoint** shows which layers are still moving. [VISUALIZER.md](VISUALIZER.md).
+  tower of slabs coloured by the weights of any checkpoint with the data flow drawn between them, hover for statistics,
+  *follow latest* reloads as the run writes new checkpoints; **change since previous checkpoint** shows which layers are
+  still moving; type a prompt to watch an animated forward pass (residual stream per block, attention over the context,
+  next-token distribution) token by token. [VISUALIZER.md](VISUALIZER.md).
 * **Your own plot** (what goes in the paper): notebook `03`, section 4 — `metrics.jsonl` → pandas → matplotlib; re-run
   the cell to refresh. Compare runs by reading several `metrics.jsonl` files into one frame (`val/loss` vs `tokens_seen`).
 * **Weights & Biases**, if your team has accounts: compute nodes have internet, so

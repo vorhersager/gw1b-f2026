@@ -6,6 +6,10 @@
     GET /api/runs                           runs under the roots: name, dir, checkpoint steps, last metrics
     GET /api/export?run=<name>&step=<N>     the visualizer data for one checkpoint (exported on first request,
                                             cached in <run>/viz/step-<N>[-vs-<M>].json); &compare=previous|none|<M>
+    GET /api/generate?run=&step=&prompt=&max_new=32&temperature=0&seed=0
+                                            a traced autoregressive completion (gw1b/viz/trace.py): per generated
+                                            token the residual stream per layer, attention over the context and
+                                            the next-token distribution; the run's tokenizer (config data.tokenizer)
 
 `gw1b viz` runs this inside your Jupyter job on port 6007 so the `gw1b jupyter` tunnel reaches it. Runs on CPU
 (JAX_PLATFORMS=cpu) so it never competes with training for the GPU; a 1.15B checkpoint takes ~1 minute to reduce.
@@ -22,6 +26,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 from . import export as ex
+from . import trace as tr
 
 STATIC = ex.STATIC_DIR
 
@@ -101,9 +106,44 @@ class Exports:
             return data
 
 
+class Models:
+    """Numpy models (+ tokenizer) per (run, step) for /api/generate; a few are kept, one generation at a time."""
+
+    def __init__(self):
+        self.mem: dict[tuple, tuple] = {}
+        self.lock = threading.Lock()
+
+    def get(self, run_dir: str, step: int | None):
+        from ..tokenizer import Tokenizer
+        steps = ex.checkpoint_steps(run_dir)
+        if not steps:
+            raise FileNotFoundError(f"no checkpoints in {run_dir}")
+        step = steps[-1] if step is None else step
+        key = (run_dir, step)
+        if key not in self.mem:
+            cfg = ex.load_config(os.path.join(run_dir, "config.yaml"))
+            tok_path = cfg.data.tokenizer
+            if not os.path.exists(tok_path):
+                raise FileNotFoundError(f"this run has no tokenizer to encode a prompt with (config data.tokenizer = {tok_path})")
+            model = tr.NumpyModel(ex.load_params(run_dir, step), cfg.model)
+            self.mem[key] = (model, Tokenizer(tok_path))
+            while len(self.mem) > 2:
+                self.mem.pop(next(iter(self.mem)))
+        return self.mem[key]
+
+    def generate(self, run_dir: str, step: int | None, prompt: str, max_new: int, temperature: float, seed: int) -> dict:
+        with self.lock:
+            model, tok = self.get(run_dir, step)
+            out = tr.trace_generate(model, tok, prompt, max_new=max_new, temperature=temperature, seed=seed)
+            out["run"] = os.path.basename(run_dir.rstrip("/"))
+            out["step"] = ex.checkpoint_steps(run_dir)[-1] if step is None else step
+            return out
+
+
 class Handler(SimpleHTTPRequestHandler):
     roots: list[str] = []
     exports: Exports
+    models: Models
 
     def log_message(self, fmt, *args):  # quieter log
         if "/api/" in fmt % args or " 200 " not in fmt % args:
@@ -160,6 +200,16 @@ class Handler(SimpleHTTPRequestHandler):
                 cmp_ = q.get("compare", ["previous"])[0]
                 compare = None if cmp_ in ("none", "") else int(cmp_) if cmp_.isdigit() else "previous"
                 return self._json(self.exports.get(run_dir, step, compare))
+            if url.path == "/api/generate":
+                run_dir = self._run_dir(q.get("run", [""])[0])
+                if run_dir is None:
+                    return self._json({"error": f"unknown run {q.get('run')}; see /api/runs"}, HTTPStatus.NOT_FOUND)
+                step = int(q["step"][0]) if q.get("step") and q["step"][0].isdigit() else None
+                prompt = q.get("prompt", [""])[0]
+                max_new = max(1, min(256, int(q.get("max_new", ["32"])[0] or 32)))
+                temperature = max(0.0, float(q.get("temperature", ["0"])[0] or 0))
+                seed = int(q.get("seed", ["0"])[0] or 0)
+                return self._json(self.models.generate(run_dir, step, prompt, max_new, temperature, seed))
             return self._file(url.path)
         except FileNotFoundError as e:
             return self._json({"error": str(e)}, HTTPStatus.NOT_FOUND)
@@ -170,6 +220,7 @@ class Handler(SimpleHTTPRequestHandler):
 def serve(roots: list[str], host: str = "0.0.0.0", port: int = 6007, tile: int = 48) -> ThreadingHTTPServer:
     Handler.roots = [os.path.abspath(r) for r in roots]
     Handler.exports = Exports(tile)
+    Handler.models = Models()
     httpd = ThreadingHTTPServer((host, port), Handler)
     httpd.daemon_threads = True
     return httpd

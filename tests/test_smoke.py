@@ -196,9 +196,17 @@ def test_viz_export_and_server(tmp_path):
     from gw1b.config import load_config
     from gw1b.train import train
     from gw1b.viz import export as vx, server as vs
-    write_synthetic_dataset(str(tmp_path / "train"), n_tokens=20_000, shard_size=10_000)
+    from gw1b.tokenizer import Tokenizer, train_sentencepiece
+    rng = np.random.default_rng(0)
+    words = ["".join(rng.choice(list("abcdefghijklmnopqrstuvwxyz"), rng.integers(2, 7))) for _ in range(300)]
+    with open(tmp_path / "corpus.txt", "w") as f:
+        for _ in range(3000):
+            f.write(" ".join(rng.choice(words, rng.integers(3, 12))) + ".\n")
+    tok_path = train_sentencepiece(str(tmp_path / "corpus.txt"), str(tmp_path / "tok"), vocab_size=400, input_sentence_size=3000)
+    write_synthetic_dataset(str(tmp_path / "train"), vocab_size=400, n_tokens=20_000, shard_size=10_000)
     cfg = load_config(os.path.join(ROOT, "configs", "tiny_debug.yaml"),
-                      [f"data.train_dir={tmp_path}/train", "data.val_dir=", f"run.out_dir={tmp_path}/runs", "run.name=viz",
+                      [f"data.train_dir={tmp_path}/train", "data.val_dir=", f"data.tokenizer={tok_path}", "model.vocab_size=400",
+                       f"run.out_dir={tmp_path}/runs", "run.name=viz",
                        "run.total_steps=4", "run.ckpt_every=2", "run.log_every=2", "run.eval_every=1000", "run.tensorboard=false"])
     train(cfg, resume=False)
     run_dir = str(tmp_path / "runs" / "viz")
@@ -227,6 +235,28 @@ def test_viz_export_and_server(tmp_path):
     html = vx.write_html(data, str(tmp_path / "model.html"))
     assert os.path.getsize(html) > 500_000 and 'id="gw1b-data"' in open(html).read()
 
+    # the numpy re-implementation (gw1b/viz/trace.py) must agree with the JAX model, full and token by token
+    from gw1b.evaluate import load_run
+    from gw1b.viz.trace import NumpyModel, trace_generate
+    jmodel, jcfg, _ = load_run(run_dir, step=4, shard_params=False)
+    nm = NumpyModel(vx.load_params(run_dir, 4), jcfg.model)
+    toks = np.random.default_rng(3).integers(0, 400, size=(1, 20))
+    ref = np.asarray(jmodel(jnp.asarray(toks)))[0]
+    lg, info = nm.forward(toks[0], trace=True)
+    assert np.abs(lg - ref[-1]).max() < 1e-3 and len(info["resid"]) == jcfg.model.n_layers + 1
+    nm.reset(); nm.forward(toks[0, :7])
+    for t in range(7, 20):
+        lg_t, _ = nm.forward([int(toks[0, t])])
+        assert np.abs(lg_t - ref[t]).max() < 1e-3
+    gen = trace_generate(nm, Tokenizer(tok_path), "abc def", max_new=3, temperature=0.0)
+    assert 1 <= len(gen["steps"]) <= 3 and len(gen["prompt_tokens"]) >= 1
+    st = gen["steps"][0]
+    assert len(st["resid"]) == jcfg.model.n_layers + 1 and len(st["resid"][0]) == min(64, jcfg.model.d_model)
+    assert len(st["attn"]) == jcfg.model.n_layers and len(st["attn"][0]) == len(gen["prompt_tokens"])
+    assert abs(sum(st["attn"][0]) - 1.0) < 1e-3 and len(st["top"]) == 8 and st["token"]["id"] == st["top"][0]["id"]
+    gen_t = trace_generate(nm, Tokenizer(tok_path), "abc def", max_new=3, temperature=0.8, seed=1)
+    assert len(gen_t["steps"]) >= 1
+
     httpd = vs.serve([str(tmp_path / "runs")], host="127.0.0.1", port=0, tile=8)
     port = httpd.server_address[1]
     th = threading.Thread(target=httpd.serve_forever, daemon=True); th.start()
@@ -239,6 +269,8 @@ def test_viz_export_and_server(tmp_path):
         assert os.path.exists(os.path.join(run_dir, "viz", "step-4-vs-2.json"))   # disk cache
         assert json.loads(get("/api/export?run=viz&step=2&compare=none"))["compare_step"] is None
         assert b"GW1B model visualizer" in get("/") and b"OrbitControls" in get("/vendor/OrbitControls.js")
+        g = json.loads(get("/api/generate?run=viz&step=4&prompt=abc%20def&max_new=2"))
+        assert g["run"] == "viz" and g["step"] == 4 and 1 <= len(g["steps"]) <= 2 and "completion" in g
         with pytest.raises(urllib.error.HTTPError):
             get("/api/export?run=nope")
     finally:
