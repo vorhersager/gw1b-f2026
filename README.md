@@ -117,7 +117,7 @@ bash gw1b-f2026/bin/gw1b-admin all         # "bash …" the first time: a Window
 |---|---|
 | `init` | paths + class Unix group → `gw1b.local.env` (git-ignored overrides of `gw1b.env`); copies the repo to `$GW1B_GROUP/gw1b-f2026` (students read it from there); creates the storage layout with group permissions |
 | `discover` | `sinfo` / `sacctmgr` / `sbatch --test-only` + a 3-minute GPU probe → A100/L40S partition names, `--account` requirement, GRES syntax, wall-time limits, apptainer, NVIDIA driver version (≥ 525 required), internet — written into `gw1b.local.env` and `docs/CLUSTER_FACTS.generated.md` |
-| `build` | the container `$GW1B_GROUP/sif/gw1b-2026.09.sif` from `env/gw1b.def` (≈ 7 GB, ≈ 10 min), or the shared `uv` venv if there is no Apptainer |
+| `build` | the container `$GW1B_GROUP/sif/gw1b-2026.10.1.sif` from `env/gw1b.def` (≈ 7 GB, ≈ 10 min), or the shared `uv` venv if there is no Apptainer |
 | `test` | imports, the CPU test suite inside the environment, `gw1b doctor --gpu` (a real GPU job) |
 | `data` | FineWeb-Edu `sample-10BT` download (≈ 28 GB, login node) → tokenizer corpus → tokenizer job → tokenization job (chained) → `$GW1B_SCRATCH/data/fineweb-edu-10B` |
 | `students` | writes `onboarding/ONBOARDING.md` — the message you send to the class — plus laptop scripts with your paths baked in |
@@ -213,7 +213,7 @@ students can develop on their own machines and submit to Pegasus when it works.
 
 Python 3.12 · `jax[cuda12]==0.10.2` · `flax==0.12.8` · `optax==0.2.8` · `orbax-checkpoint==0.12.6` · `grain==0.2.18` ·
 `sentencepiece==0.2.2` · `tokenizers==0.23.2` · `datasets==5.0.1` · `jupyterlab==4.6.4` · `lm-eval==0.4.13` ·
-`transformers==5.17.0` · CPU-only `torch==2.14.0` — fully pinned in `env/requirements.txt`. Environment version **2026.09**.
+`transformers==5.17.0` · CPU-only `torch==2.14.0` — fully pinned in `env/requirements.txt`. Environment version **2026.10.1** (same pins as 2026.09, plus `pytest` inside the image and an aarch64 build for the GH200 nodes).
 
 ## License
 

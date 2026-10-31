@@ -61,8 +61,8 @@ Requires the CUDA 12.8+ runtime in the wheels (JAX 0.10 has it).
 **Grace Hopper GH200 (8 single-GPU nodes, `superChip`, `--gpu-type gh200`)** — H100 96 GB on a Grace CPU with a
 shared-memory design; the fastest chips on the cluster and, per HPC, the least contended. One GH200 ≈ 3 A100s:
 20B tokens in ~5.5 days on one node at 35 % MFU (`gw1b budget --gpu gh200`), and the 7-day limit allows it in one
-job. The host is aarch64, so it needs the arm64 image: run the build-image workflow with `arm64 = true`, set
-`GW1B_IMAGE_ARM64` in `gw1b.env`, `gw1b-admin build arm64`, then `gw1b doctor --gpu --gpu-type gh200`. Multi-node
+job. The host is aarch64, so it needs the arm64 image: run the build-image workflow with `arm64 = true`
+(`GW1B_IMAGE_ARM64` in `gw1b.env` defaults to the `<version>-arm64` tag), `gw1b-admin build arm64`, then `gw1b doctor --gpu --gpu-type gh200`. Multi-node
 GH200 jobs would go over the same EDR fabric (`--nodes 2`), untested. The OOD Jupyter app cannot run there yet.
 
 **L40S (48 GB)** — bf16 + flash attention, roughly 60 % of an A100 for training; good for 100M–350M proxies.

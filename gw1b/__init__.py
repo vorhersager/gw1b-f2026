@@ -15,4 +15,4 @@ decoder-only language model on the GWU Pegasus cluster:
     gw1b.budget      – FLOPs / GPU-hour / wall-clock calculator ("compute as an experimental variable")
 """
 
-__version__ = "2026.09.0"
+__version__ = "2026.10.1"
