@@ -28,3 +28,7 @@ finish() {
     echo "# dry run: nothing submitted. Re-run with --submit to queue these jobs."
   fi
 }
+
+scale_lr() {  # scale_lr <lr> <factor>: e.g. 6e-4 x 0.5 -> 3e-4 (short form, used in run names)
+  awk -v x="$1" -v f="$2" 'BEGIN { printf "%.2e\n", x * f }' | sed -E 's/\.?0+e/e/; s/e([-+]?)0*([0-9])/e\1\2/; s/e\+/e/'
+}

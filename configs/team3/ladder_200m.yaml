@@ -1,0 +1,12 @@
+# Team 3, E5: scale-ladder point at 200M (V100, float32). 2B tokens = 10 tokens/parameter, as for every ladder size.
+# Learning rates are set by team3/experiments/e5_ladder_200m.sh around the trend from E1 (50M) and E1b (100M).
+extends: ../200m.yaml
+model:
+  dtype: float32
+optim:
+  warmup_steps: 500       # half the class recipe, so warmup stays the same share (13%) of the halved run
+run:
+  out_dir: ${GW1B_SCRATCH}/teams/team3/runs
+  total_tokens: 2_000_000_000
+  eval_seqs: 512
+  ckpt_every: 500           # ~4 h of training on 4 V100s: chained 1-day jobs lose at most that much at a time limit

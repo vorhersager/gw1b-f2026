@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Team 3, E1: AdamW vs Muon tuning at 50M on V100 (float32), 1B tokens each (20 tokens/parameter).
+# Team 3, E1: AdamW vs Muon tuning at 50M on V100 (float32), 0.5B tokens each (10 tokens/parameter, like every
+# ladder size and the production run). Run names carry the token budget (tok0.5B); the first stage-1 sweep at 1B
+# tokens (20 tokens/parameter) has names without it and stays as the 50M data-axis comparison.
 #
 # Stage 1: 5 learning rates at weight decay 0.1, both optimizers (10 runs)
 #   bash team3/experiments/e1_tune_50m.sh stage1
@@ -14,10 +16,11 @@
 source "$(dirname "$0")/_common.sh"
 STAGE="${1:-}"
 LRS=(1.5e-4 3e-4 6e-4 1.2e-3 2.4e-3)     # centred on the class 50M default (6e-4), factor-2 steps
-COMMON="--gpus 4 --gpu-type v100 --time 12:00:00 --config configs/team3/e1_50m.yaml"
+COMMON="--gpus 4 --gpu-type v100 --time 6:00:00 --config configs/team3/e1_50m.yaml"
+TOK=tok0.5B
 
 run() {  # run <optimizer> <lr> <wd> <seed>
-  emit $COMMON --set run.name="team3-e1-$1-lr$2-wd$3-s$4" --set optim.name="$1" \
+  emit $COMMON --set run.name="team3-e1-$1-lr$2-wd$3-$TOK-s$4" --set optim.name="$1" \
     --set optim.lr="$2" --set optim.weight_decay="$3" $(seed_args "$4")
 }
 
