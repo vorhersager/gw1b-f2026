@@ -44,7 +44,7 @@ From: python:3.12-slim-bookworm
     export PYTHONUNBUFFERED=1
     export HF_HUB_DISABLE_TELEMETRY=1
     export TOKENIZERS_PARALLELISM=false
-    export GW1B_ENV_VERSION=2026.09
+    export GW1B_ENV_VERSION=2026.10.1
     # Reasonable XLA defaults for training on NVIDIA GPUs
     export XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.92}
     export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_enable_latency_hiding_scheduler=true}"
@@ -55,7 +55,7 @@ From: python:3.12-slim-bookworm
 
 %labels
     Author GW1B course staff
-    Version 2026.09
+    Version 2026.10.1
     Description JAX/Flax LLM training environment for the GWU Pegasus cluster
 
 %help

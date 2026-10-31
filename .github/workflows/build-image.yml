@@ -1,7 +1,7 @@
 name: build-image
 # Builds env/Dockerfile and publishes it to GHCR so Pegasus (which has no fakeroot) can pull it:
-#   apptainer build gw1b.sif docker://ghcr.io/<owner>/gw1b-f2026:2026.09     (= gw1b-admin build)
-# Run it from GitHub -> Actions -> build-image -> "Run workflow", or push a tag env-2026.09.
+#   apptainer build gw1b.sif docker://ghcr.io/<owner>/gw1b-f2026:2026.10.1     (= gw1b-admin build)
+# Run it from GitHub -> Actions -> build-image -> "Run workflow", or push a tag env-2026.10.1.
 # After the first run, make the package PUBLIC once: GitHub profile -> Packages -> gw1b-f2026 ->
 # Package settings -> Change visibility. Otherwise Pegasus needs `apptainer registry login` with a token.
 on:
@@ -9,10 +9,10 @@ on:
     inputs:
       version:
         description: "image tag (= GW1B_ENV_VERSION in gw1b.env)"
-        default: "2026.09"
+        default: "2026.10.1"
         required: true
       arm64:
-        description: "also build the aarch64 image for the Grace Hopper (superChip) nodes (tag <version>-arm64; ~1 h under emulation)"
+        description: "also build the aarch64 image for the Grace Hopper (superChip) nodes (tag <version>-arm64; ~30 min under emulation)"
         type: boolean
         default: false
   push:
