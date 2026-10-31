@@ -1,0 +1,30 @@
+{
+  "study": "RQ4.1 exploratory 50M single-seed pilot; not the three-seed 100M ablation",
+  "selected_before_evaluation": "2026-10-28",
+  "selection_basis": "available research checkpoints using class tokenizer and float32, compatible with V100",
+  "run": "/scratch/gw1b-class/users/jsipple/runs/team2-gqa-vs-mha",
+  "run_config_sha256": "fae87b8009eaec463a80836eae6d02fa46059a974764633a0d76dd7d3c52d840",
+  "tokenizer": "/SEAS/groups/gw1b-class/tokenizer/gw1b-32k.model",
+  "tokenizer_sha256": "7adea15e872b94f54b9fdedab3b3774d6526c7c807e088bb51c99c75d89496d5",
+  "checkpoints": [
+    {"step": 1000, "training_tokens": 262144000, "meta_sha256": "cd44f90e512a168475c4d6eeb087c7a7017c6486c321f992ee921c399c28889f"},
+    {"step": 2000, "training_tokens": 524288000, "meta_sha256": "944013dbd2f8045eaf5e627bb9c54cde0e161577a69e8130fae4833bb8ab7410"}
+  ],
+  "training_seeds": {"initialization": 0, "data_order": 0},
+  "tasks": ["hellaswag", "arc_easy", "piqa"],
+  "splits": {"hellaswag": "validation", "arc_easy": "test", "piqa": "validation"},
+  "revisions_file": "rq41/pilot_revisions.json",
+  "fewshot": 0,
+  "evaluation_seed": 0,
+  "batch_size": 2,
+  "compute_dtype": "float32",
+  "validation_limit": 50,
+  "target_limit": 500,
+  "count_rule": "First fitting count in [500,100,50], estimated only from validation runtime with 1.5x margin plus 120 seconds; freeze count before scoring either main checkpoint",
+  "selection": "same first N eligible processed examples; pair by task/split/harness doc_id and verify hashes/requests",
+  "metrics": ["acc,none", "acc_norm,none"],
+  "interval": "individual unadjusted 95% percentile question bootstrap, 10000 replicates, seed 0",
+  "determinism_tolerance": {"absolute_loglikelihood": 0.00001, "predictions_and_metrics": "exact"},
+  "resource_cap": {"gpus": 1, "gpu": "v100", "cpus": 2, "memory_gb": 16, "minutes": 30, "maximum_gpu_hours": 0.5, "notional_usd_per_gpu_hour": 1.0},
+  "pending_primary_study": "confirm owner/budget and availability of three independent 100M training seeds"
+}

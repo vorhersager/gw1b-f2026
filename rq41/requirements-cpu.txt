@@ -1,0 +1,3 @@
+# Lightweight statistics/serialization checks only; matches the class lock.
+numpy==2.5.3
+pytest==9.1.1

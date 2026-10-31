@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "description": "Artificial questions and log-likelihoods. No trained GW1B or benchmark results. Unicode choices distinguish Python characters from UTF-8 bytes.",
+  "examples": [
+    {"id": "q0", "query": "Synthetic zero", "choices": ["é", "long"], "gold": 1, "scores": [-2, -3], "acc": 0, "acc_norm": 1},
+    {"id": "q1", "query": "Synthetic one", "choices": ["é", "long"], "gold": 0, "scores": [-1, -8], "acc": 1, "acc_norm": 1},
+    {"id": "q2", "query": "Synthetic two", "choices": ["é", "long"], "gold": 0, "scores": [-4, -2], "acc": 0, "acc_norm": 0},
+    {"id": "q3", "query": "Synthetic three", "choices": ["é", "long"], "gold": 1, "scores": [-1, -2], "acc": 0, "acc_norm": 1}
+  ],
+  "expected_scores": {"acc,none": 0.25, "acc_norm,none": 0.75}
+}

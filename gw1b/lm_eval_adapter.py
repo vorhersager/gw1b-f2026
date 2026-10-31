@@ -137,20 +137,49 @@ class GW1BLM:
 
 
 def run(run_dir: str, tasks: list[str], step: int | None = None, limit: int | None = None, batch_size: int = 16,
-        num_fewshot: int | None = None, out_dir: str | None = None) -> dict:
+        num_fewshot: int | None = None, out_dir: str | None = None, *, rq41: bool = False,
+        eval_seed: int = 0, synthetic: bool = False, task_revisions: dict | None = None) -> dict:
     import lm_eval
     from .evaluate import load_run
+
+    extra = {}
+    if rq41:
+        from .rq41_evaluation import prepare_tasks, build_metadata, inspect_tasks
+        from .rq41_records import reserve_output, write_bundle, write_json
+        from uuid import uuid4
+        from pathlib import Path
+
+        # Check the output path before loading a model or downloading task data.
+        out_dir = str(reserve_output(out_dir or Path(run_dir) / "lm_eval" / f"rq41-{uuid4().hex}"))
+        manager, task_objects = prepare_tasks(tasks, limit, num_fewshot, batch_size, eval_seed, task_revisions)
+        extra = {"task_manager": manager, "random_seed": eval_seed, "numpy_random_seed": eval_seed,
+                 "torch_random_seed": eval_seed, "fewshot_random_seed": eval_seed,
+                 "bootstrap_iters": 0}  # CPU tool computes our documented percentile intervals.
+    elif synthetic or task_revisions is not None:
+        raise ValueError("--synthetic/--task-revisions require --rq41")
 
     model, cfg, loaded_step = load_run(run_dir, step, shard_params=False)
     tok = Tokenizer(cfg.data.tokenizer)
     lm = GW1BLM(model, tok, batch_size=batch_size)
     t0 = time.time()
-    res = lm_eval.simple_evaluate(model=lm, tasks=tasks, num_fewshot=num_fewshot, limit=limit, batch_size=batch_size,
-                                  log_samples=False)
+    if rq41:
+        metadata = build_metadata(run_dir, cfg, model, tok, loaded_step, batch_size, eval_seed, synthetic)
+        print(json.dumps(metadata["provenance"], indent=2), flush=True)
+    res = lm_eval.simple_evaluate(model=lm, tasks=list(task_objects.values()) if rq41 else tasks,
+                                  num_fewshot=num_fewshot, limit=limit, batch_size=batch_size,
+                                  log_samples=rq41, **extra)
     results = res["results"] if isinstance(res, dict) else res.results  # EvalResults in newer versions
     table = {task: {k: v for k, v in metrics.items() if isinstance(v, (int, float))} for task, metrics in results.items()}
     summary = {"run": run_dir, "step": loaded_step, "tasks": tasks, "limit": limit, "num_fewshot": num_fewshot,
                "n_params": cfg.model.n_params, "seconds": time.time() - t0, "results": table}
+    if rq41:
+        definitions, choices, counts = inspect_tasks(task_objects, res, limit)
+        write_bundle(out_dir, res, metadata, definitions, choices, counts)
+        path = os.path.join(out_dir, "summary.json")
+        write_json(path, summary)
+        print(json.dumps(table, indent=2))
+        print(f"[rq41] wrote validated evaluation bundle to {out_dir}")
+        return summary
     out_dir = out_dir or os.path.join(run_dir, "lm_eval")
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"step{loaded_step}_{'-'.join(tasks)[:60]}.json")
@@ -170,8 +199,17 @@ def main(argv=None):
     ap.add_argument("--num-fewshot", type=int, default=None)
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--rq41", action="store_true", help="save validated per-example RQ4.1 bundle; --out must be new")
+    ap.add_argument("--eval-seed", type=int, default=0, help="RQ4.1 Python/numpy/torch/fewshot seed")
+    ap.add_argument("--synthetic", action="store_true", help="label artificial model/data fixtures; requires --rq41")
+    ap.add_argument("--task-revisions", help="JSON mapping task names to immutable Hub commits; requires --rq41")
     a = ap.parse_args(argv)
-    run(a.run, a.tasks.split(","), a.step, a.limit, a.batch_size, a.num_fewshot, a.out)
+    revisions = None
+    if a.task_revisions:
+        with open(a.task_revisions) as f:
+            revisions = json.load(f)
+    run(a.run, a.tasks.split(","), a.step, a.limit, a.batch_size, a.num_fewshot, a.out,
+        rq41=a.rq41, eval_seed=a.eval_seed, synthetic=a.synthetic, task_revisions=revisions)
 
 
 if __name__ == "__main__":

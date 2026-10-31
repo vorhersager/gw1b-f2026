@@ -14,3 +14,13 @@ docs/CLUSTER_FACTS.generated.md
 ONBOARDING.md
 onboarding/
 gw1b.local.env
+# RQ4.1 generated artifacts (synthetic fixtures live under tests/fixtures/rq41/).
+rq41_outputs/
+lm_eval/
+checkpoints/
+datasets/
+data/
+*.pem
+*.key
+.env
+.DS_Store
