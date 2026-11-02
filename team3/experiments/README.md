@@ -61,5 +61,6 @@ Branches (`branch.py`): a branch copies one checkpoint of a longer run into a ne
 run's metrics up to that step, and `gw1b train` finishes it from there. The tool refuses unless the branch would
 have trained exactly like the trunk up to that step (same model, data, batch, optimizer and the same learning rate
 at every step), so a branch equals a standalone run of its length (`tests/test_team3_branch.py` checks this).
-Start a branch on the same number and type of GPUs as its trunk. Its `summary.json` GPU-hours include the trunk's
+The trunk must keep every checkpoint (`run.ckpt_keep_every=1`): the tool checks the settings stored in
+each one up to the branch point. Start a branch on the same number and type of GPUs as its trunk. Its `summary.json` GPU-hours include the trunk's
 hours up to the branch point; the extra cost of a branch is only its own cooldown.

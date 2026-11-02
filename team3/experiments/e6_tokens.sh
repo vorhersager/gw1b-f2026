@@ -10,7 +10,8 @@
 # where a 10 and a 20 tokens/parameter WSD run start their cooldown (k and 2k steps; the trunk's own cooldown starts
 # at 3k), so each branch copies one and runs only its cooldown (team3/experiments/branch.py). A branch then equals
 # a standalone WSD run of its length, and three results cost about 1.2 runs. Branch once the trunk is past 2k steps.
-# The trunk keeps every k/2 steps, so 5 and 15 (and 25 at 50M) tokens/parameter can be branched later too.
+# The trunk saves every k/2 steps and keeps every checkpoint (branch.py checks its full history), so 5 and 15
+# (and 25 at 50M) tokens/parameter can be branched later too.
 # The 10 tokens/parameter branch repeats a run of E1/E1b with the WSD schedule; cosine at the same length is E1/E1b.
 source "$(dirname "$0")/_common.sh"
 [[ $# -eq 6 ]] || { echo "usage: $0 trunks|branches 50m|100m <adamw_lr> <adamw_wd> <muon_lr> <muon_wd> [--submit]" >&2; exit 2; }
@@ -31,7 +32,20 @@ trunk() {  # trunk <optimizer> <lr> <wd>
   emit $COMMON $TRUNK_TIME --config $CONFIG --set run.name="$(name "$1" "$2" "$3" "${TOKS[2]}")" \
     --set optim.name="$1" --set optim.lr="$2" --set optim.weight_decay="$3" $(seed_args 0) \
     --set run.total_tokens="${NTOK[2]}" --set optim.schedule=wsd --set optim.decay_fraction=0.2 \
-    --set run.ckpt_every=$((K / 2)) --set run.ckpt_keep_every=$((K / 2))
+    --set run.ckpt_every=$((K / 2)) --set run.ckpt_keep_every=1
+}
+
+check_branches() {  # before submitting anything: both trunks have the 20 tokens/parameter checkpoint, no branch exists
+  local opt lr wd out
+  for args in "adamw $1 $2" "muon $3 $4"; do
+    read -r opt lr wd <<< "$args"
+    [[ -d "$RUNS/$(name "$opt" "$lr" "$wd" "${TOKS[2]}")/checkpoints/$((2 * K))" ]] || {
+      echo "$(name "$opt" "$lr" "$wd" "${TOKS[2]}") has no checkpoint at step $((2 * K)) yet; wait for it" >&2; exit 1; }
+    for i in 0 1; do
+      out="$(name "$opt" "$lr" "$wd" "${TOKS[$i]}")"
+      [[ ! -e "$RUNS/$out" ]] || { echo "$RUNS/$out already exists; nothing submitted" >&2; exit 1; }
+    done
+  done
 }
 
 branches() {  # branches <optimizer> <lr> <wd>
@@ -46,7 +60,8 @@ branches() {  # branches <optimizer> <lr> <wd>
 
 case "$STAGE" in
   trunks)   trunk adamw "$3" "$4";    trunk muon "$5" "$6" ;;
-  branches) branches adamw "$3" "$4"; branches muon "$5" "$6" ;;
+  branches) [[ $SUBMIT -eq 0 ]] || check_branches "$3" "$4" "$5" "$6"
+            branches adamw "$3" "$4"; branches muon "$5" "$6" ;;
   *) echo "usage: $0 trunks|branches 50m|100m <adamw_lr> <adamw_wd> <muon_lr> <muon_wd> [--submit]" >&2; exit 2 ;;
 esac
 finish

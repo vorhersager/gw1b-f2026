@@ -44,9 +44,10 @@ def test_check_branch_accepts_the_cooldown_start_only():
 
 
 def test_trunk_must_keep_every_checkpoint():
-    keeps = lambda every, keep: load_config(TINY, [f"run.ckpt_every={every}", f"run.ckpt_keep_every={keep}"])
-    assert branch.pruning_problem(keeps(8, 8)) is None and branch.pruning_problem(keeps(16, 8)) is None
-    assert branch.pruning_problem(keeps(8, 16)) and branch.pruning_problem(load_config(TINY))  # default: prunes
+    keeps = lambda keep: load_config(TINY, ["run.ckpt_every=8", f"run.ckpt_keep_every={keep}"])
+    assert branch.pruning_problem(keeps(1)) is None
+    assert branch.pruning_problem(keeps(8))               # forced saves at a job's end (e.g. step 10) can be deleted
+    assert branch.pruning_problem(load_config(TINY))      # default: keeps only the last few
 
 
 def test_length_in_steps_replaces_the_inherited_token_budget():
@@ -65,7 +66,7 @@ def test_branch_equals_a_standalone_run(tmp_path):
     write_synthetic_dataset(str(tmp_path / "data/synthetic/val"), n_tokens=10_000, seed=1, prefix="val")
     runs = tmp_path / "users/test/runs"
     sets = WSD + ["run.log_every=2", "run.eval_every=10", "run.eval_batches=2", "run.ckpt_every=8",
-                  "run.ckpt_keep_every=8"]
+                  "run.ckpt_keep_every=1"]
 
     def train(name, steps, config=TINY):
         args = [sys.executable, "-m", "gw1b.train", "--config", config]
@@ -82,6 +83,8 @@ def test_branch_equals_a_standalone_run(tmp_path):
     bad = subprocess.run(tool + ["--step", "16", "--set", "optim.lr=2e-3"], env=env, cwd=ROOT, capture_output=True,
                          text=True)
     assert bad.returncode != 0 and "optim.lr" in bad.stderr and not (runs / "branch").exists()
+    with open(runs / "trunk" / "metrics.jsonl", "a") as f:
+        f.write('{"step": 31, "train/lo')                                 # a live trunk mid-way through a line
     ok = subprocess.run(tool + ["--step", "16"], env=env, cwd=ROOT, capture_output=True, text=True)
     assert ok.returncode == 0, ok.stderr[-2000:]
     assert "resumed from step 16" in train("branch", 20, config=str(runs / "branch" / "config.yaml"))
@@ -94,7 +97,8 @@ def test_branch_equals_a_standalone_run(tmp_path):
     b, a = curve("branch"), curve("alone")
     assert set(a) <= set(b) and min(b) == 1 and max(b) == 20         # the trunk's curve up to 16, then the branch
     assert [b[s] for s in sorted(a)] == pytest.approx([a[s] for s in sorted(a)], rel=1e-5)
-    assert json.load(open(runs / "branch" / "branch.json"))["step"] == 16
+    info = json.load(open(runs / "branch" / "branch.json"))
+    assert info["step"] == 16 and info["trunk_gpus"]["n_devices"] == 8 and not (runs / "branch.branch-tmp").exists()
 
     # A trunk resumed with another learning rate: its config.yaml now says 2e-3, but the checkpoint at step 16 was
     # trained with 1e-3. Branching from it with the new config must fail.

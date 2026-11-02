@@ -11,8 +11,9 @@ that step, so `gw1b train` resumes there and runs only the rest: the branch's ow
 It refuses unless the branch would have trained exactly like the trunk up to --step: same model, data, batch and
 optimizer, and the same learning rate at every step so far (both schedules are evaluated step by step). Then the
 branch equals a standalone run of its length with the same seeds. For a WSD trunk that means branching where the
-shorter run starts its cooldown, e.g. step 1526 for a 0.5B-token 50M run with decay_fraction 0.2: the trunk keeps
-those checkpoints when run.ckpt_every and run.ckpt_keep_every divide them (team3/experiments/e6_tokens.sh).
+shorter run starts its cooldown, e.g. step 1526 for a 0.5B-token 50M run with decay_fraction 0.2: the trunk saves
+there when run.ckpt_every divides those steps, and keeps every checkpoint (run.ckpt_keep_every=1, see
+team3/experiments/e6_tokens.sh).
 Run the branch on the same number of GPUs as the trunk, so gradient accumulation (in the optimizer state) matches.
 """
 import argparse
@@ -79,13 +80,14 @@ def branch_overrides(name: str, tokens: int | None, sets: list[str]) -> list[str
 
 
 def pruning_problem(cfg: TrainConfig) -> str | None:
-    """Every job of the trunk saves at multiples of ckpt_every; if ckpt_keep_every divides it, none of those are
-    ever deleted, so each job's settings stay on record. Otherwise a resumed job with other settings could have
-    left no checkpoint behind, and the history cannot be checked."""
-    every, keep = cfg.run.ckpt_every, cfg.run.ckpt_keep_every
-    if not keep or every % keep:
-        return (f"the trunk deletes old checkpoints (ckpt_every {every}, ckpt_keep_every {keep}), so its earlier "
-                f"settings cannot be checked; trunks need ckpt_keep_every dividing ckpt_every")
+    """Each job of the trunk leaves checkpoints with its settings: at multiples of ckpt_every, plus a forced one when
+    it finishes or is interrupted. Only ckpt_keep_every=1 keeps all of them (the save frequency is unchanged);
+    otherwise a resumed job with other settings could have left no checkpoint behind, and the history cannot be
+    checked."""
+    keep = cfg.run.ckpt_keep_every
+    if keep != 1:
+        return (f"the trunk may delete old checkpoints (ckpt_keep_every {keep}), so its earlier settings cannot "
+                f"be checked; trunks need run.ckpt_keep_every=1")
     return None
 
 
@@ -135,18 +137,32 @@ def main(argv: list[str] | None = None) -> None:
     out = os.path.join(branch.run.out_dir, branch.run.name)
     if os.path.exists(out):
         raise SystemExit(f"{out} already exists; pick another --name or remove it")
-    shutil.copytree(src, os.path.join(out, "checkpoints", str(a.step)))
-    save_config(branch, os.path.join(out, "config.yaml"))
-    with open(os.path.join(a.trunk, "metrics.jsonl")) as f_in, open(os.path.join(out, "metrics.jsonl"), "w") as f_out:
+    # The trunk's GPUs: the branch must use the same, so gradient accumulation and the loader position match.
+    trunk_summary = os.path.join(a.trunk, "summary.json")
+    gpus = {k: json.load(open(trunk_summary)).get(k) for k in ("n_devices", "gpu_kind", "grad_accum")} \
+        if os.path.exists(trunk_summary) else {}
+    # Build the branch next to its final place and rename at the end, so a failure leaves no half-made run.
+    tmp = out + ".branch-tmp"
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    with open(os.path.join(a.trunk, "metrics.jsonl")) as f_in, open(os.path.join(tmp, "metrics.jsonl"), "w") as f_out:
         for line in f_in:   # the trunk's curve up to the branch point, so the branch's curve starts at step 0
-            if line.strip() and json.loads(line).get("step", 0) <= a.step:
-                f_out.write(line)
-    with open(os.path.join(out, "branch.json"), "w") as f:
-        json.dump({"trunk": os.path.abspath(a.trunk), "step": a.step, "total_steps": branch.resolved_total_steps()},
-                  f, indent=2)
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:   # a live trunk may be halfway through writing its last line
+                continue
+            if row.get("step", 0) <= a.step:
+                f_out.write(line if line.endswith("\n") else line + "\n")
+    shutil.copytree(src, os.path.join(tmp, "checkpoints", str(a.step)))
+    save_config(branch, os.path.join(tmp, "config.yaml"))
+    with open(os.path.join(tmp, "branch.json"), "w") as f:
+        json.dump({"trunk": os.path.abspath(a.trunk), "step": a.step, "total_steps": branch.resolved_total_steps(),
+                   "trunk_gpus": gpus}, f, indent=2)
+    os.rename(tmp, out)
     print(f"[branch] {out}: step {a.step} of {os.path.basename(os.path.normpath(a.trunk))}, "
           f"{branch.resolved_total_steps() - a.step} steps to go (of {branch.resolved_total_steps()})")
-    print(f"[branch] start it with:  gw1b train <same --gpus/--gpu-type as the trunk> --config {out}/config.yaml")
+    on = f"{gpus['n_devices']} x {gpus['gpu_kind']}" if gpus else "the same GPUs as the trunk"
+    print(f"[branch] start it on {on}:  gw1b train --gpus N --gpu-type T --config {out}/config.yaml")
 
 
 if __name__ == "__main__":
