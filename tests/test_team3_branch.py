@@ -35,10 +35,18 @@ def test_check_branch_accepts_the_cooldown_start_only():
     assert branch.check_branch(trunk, short, 8) == []                 # earlier is fine too: still constant there
     assert branch.check_branch(trunk, short, 17) == []                # 17 updates used counts 0..16: all equal
     assert "learning rates differ at update 17" in branch.check_branch(trunk, short, 18)[0]
+    whole = load_config(TINY, WSD + ["run.total_steps=30", "run.name=b"])
+    assert "not inside" in branch.check_branch(trunk, whole, 30)[0]      # nothing left to train: no summary, no eval
     other = load_config(TINY, WSD + ["run.total_steps=20", "optim.lr=2e-3"])
     assert any(p.startswith("optim.lr") for p in branch.check_branch(trunk, other, 16))
     reseeded = load_config(TINY, WSD + ["run.total_steps=20", "data.seed=1"])
     assert any(p.startswith("data.seed") for p in branch.check_branch(trunk, reseeded, 16))
+
+
+def test_trunk_must_keep_every_checkpoint():
+    keeps = lambda every, keep: load_config(TINY, [f"run.ckpt_every={every}", f"run.ckpt_keep_every={keep}"])
+    assert branch.pruning_problem(keeps(8, 8)) is None and branch.pruning_problem(keeps(16, 8)) is None
+    assert branch.pruning_problem(keeps(8, 16)) and branch.pruning_problem(load_config(TINY))  # default: prunes
 
 
 def test_length_in_steps_replaces_the_inherited_token_budget():

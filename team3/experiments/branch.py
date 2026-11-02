@@ -46,8 +46,8 @@ def check_branch(trunk: TrainConfig, branch: TrainConfig, step: int) -> list[str
         for key, value in t[section].items():
             if key not in FREE.get(section, ()) and b[section][key] != value:
                 problems.append(f"{section}.{key}: trunk {value!r}, branch {b[section][key]!r}")
-    if not 0 < step <= branch.resolved_total_steps():
-        problems.append(f"step {step} is outside the branch's {branch.resolved_total_steps()} steps")
+    if not 0 < step < branch.resolved_total_steps():   # at the last step nothing is left to train: no summary/eval
+        problems.append(f"step {step} is not inside the branch's {branch.resolved_total_steps()} steps")
     else:
         steps = np.arange(step)
         lr_t = np.asarray(lr_schedule(trunk.optim, trunk.resolved_total_steps())(steps))
@@ -78,10 +78,22 @@ def branch_overrides(name: str, tokens: int | None, sets: list[str]) -> list[str
     return out + sets
 
 
+def pruning_problem(cfg: TrainConfig) -> str | None:
+    """Every job of the trunk saves at multiples of ckpt_every; if ckpt_keep_every divides it, none of those are
+    ever deleted, so each job's settings stay on record. Otherwise a resumed job with other settings could have
+    left no checkpoint behind, and the history cannot be checked."""
+    every, keep = cfg.run.ckpt_every, cfg.run.ckpt_keep_every
+    if not keep or every % keep:
+        return (f"the trunk deletes old checkpoints (ckpt_every {every}, ckpt_keep_every {keep}), so its earlier "
+                f"settings cannot be checked; trunks need ckpt_keep_every dividing ckpt_every")
+    return None
+
+
 def history_problems(trunk_dir: str, branch: TrainConfig, step: int) -> list[str]:
-    """Check the branch against the config stored in every kept trunk checkpoint up to `step`, not only the trunk's
+    """Check the branch against the config stored in every trunk checkpoint up to `step`, not only the trunk's
     config.yaml (rewritten on each resume): a trunk resumed with other settings fails at the first checkpoint
-    saved under them. Each checkpoint's config is the one its job trained with since the previous checkpoint."""
+    saved under them. Each checkpoint's config is the one its job trained with since the previous checkpoint, and
+    the trunk must keep all of them (pruning_problem)."""
     ckpt_dir = os.path.join(trunk_dir, "checkpoints")
     problems = []
     for s in sorted(int(d) for d in os.listdir(ckpt_dir) if d.isdigit() and int(d) <= step):
@@ -89,7 +101,10 @@ def history_problems(trunk_dir: str, branch: TrainConfig, step: int) -> list[str
         if "config" not in meta:
             problems.append(f"checkpoint {s} has no stored config")
             continue
-        problems += [f"checkpoint {s}: {p}" for p in check_branch(config_from_dict(meta["config"]), branch, s)]
+        cfg = config_from_dict(meta["config"])
+        problems += [f"checkpoint {s}: {p}" for p in check_branch(cfg, branch, s)]
+        if p := pruning_problem(cfg):
+            problems.append(f"checkpoint {s}: {p}")
     return problems
 
 
