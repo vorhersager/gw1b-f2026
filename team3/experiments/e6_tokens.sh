@@ -25,7 +25,7 @@ case "$SIZE" in   # tokens at 10/20/30 tokens per parameter; k = cooldown start 
 esac
 COMMON="--gpus 4 --gpu-type v100"
 
-name() { echo "team3-e6-$1-lr$2-wd$3-tok$4-s0"; }   # name <optimizer> <lr> <wd> <tokens>
+name() { echo "team3-e6-$SIZE-$1-lr$2-wd$3-tok$4-s0"; }   # name <optimizer> <lr> <wd> <tokens>
 
 trunk() {  # trunk <optimizer> <lr> <wd>
   emit $COMMON $TRUNK_TIME --config $CONFIG --set run.name="$(name "$1" "$2" "$3" "${TOKS[2]}")" \

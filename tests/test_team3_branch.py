@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -16,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "team3", "experiments"))
 
-from gw1b.config import load_config  # noqa: E402
+from gw1b.config import load_config, save_config  # noqa: E402
 from gw1b.data import write_synthetic_dataset  # noqa: E402
 import branch  # noqa: E402
 
@@ -32,11 +33,22 @@ def test_check_branch_accepts_the_cooldown_start_only():
     assert branch.cooldown_start(short) == 16 and branch.cooldown_start(trunk) == 24
     assert branch.check_branch(trunk, short, 16) == []
     assert branch.check_branch(trunk, short, 8) == []                 # earlier is fine too: still constant there
-    assert "learning rates differ from step 17" in branch.check_branch(trunk, short, 18)[0]
+    assert branch.check_branch(trunk, short, 17) == []                # 17 updates used counts 0..16: all equal
+    assert "learning rates differ at update 17" in branch.check_branch(trunk, short, 18)[0]
     other = load_config(TINY, WSD + ["run.total_steps=20", "optim.lr=2e-3"])
     assert any(p.startswith("optim.lr") for p in branch.check_branch(trunk, other, 16))
     reseeded = load_config(TINY, WSD + ["run.total_steps=20", "data.seed=1"])
     assert any(p.startswith("data.seed") for p in branch.check_branch(trunk, reseeded, 16))
+
+
+def test_length_in_steps_replaces_the_inherited_token_budget():
+    assert "run.total_tokens=null" in branch.branch_overrides("b", None, ["run.total_steps=20"])
+    assert "run.total_tokens=null" not in branch.branch_overrides("b", 4096, ["run.total_steps=20"])
+    trunk = load_config(TINY, WSD + ["run.total_tokens=61440"])          # 30 steps of 16 x 128 tokens
+    with tempfile.TemporaryDirectory() as d:
+        save_config(trunk, os.path.join(d, "config.yaml"))
+        short = load_config(os.path.join(d, "config.yaml"), branch.branch_overrides("b", None, ["run.total_steps=20"]))
+    assert short.resolved_total_steps() == 20
 
 
 def test_branch_equals_a_standalone_run(tmp_path):
@@ -75,3 +87,15 @@ def test_branch_equals_a_standalone_run(tmp_path):
     assert set(a) <= set(b) and min(b) == 1 and max(b) == 20         # the trunk's curve up to 16, then the branch
     assert [b[s] for s in sorted(a)] == pytest.approx([a[s] for s in sorted(a)], rel=1e-5)
     assert json.load(open(runs / "branch" / "branch.json"))["step"] == 16
+
+    # A trunk resumed with another learning rate: its config.yaml now says 2e-3, but the checkpoint at step 16 was
+    # trained with 1e-3. Branching from it with the new config must fail.
+    train("changed", 16)
+    args = [sys.executable, "-m", "gw1b.train", "--config", TINY]
+    for s in sets + ["run.name=changed", "run.total_steps=30", "optim.lr=2e-3"]:
+        args += ["--set", s]
+    assert subprocess.run(args, env=env, cwd=ROOT, capture_output=True, text=True).returncode == 0
+    tool[2] = str(runs / "changed")
+    out = subprocess.run(tool[:3] + ["--name", "changed-branch", "--set", "run.total_steps=20", "--step", "16"],
+                         env=env, cwd=ROOT, capture_output=True, text=True)
+    assert out.returncode != 0 and "checkpoint 16: optim.lr" in out.stderr and not (runs / "changed-branch").exists()
