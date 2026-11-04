@@ -29,8 +29,11 @@ Python on the login node runs inside the class environment: `gw1b python <script
 | `e1b_lr_100m.sh wsd <adamw lr> <wd> <muon lr> <wd>` | E1b: each optimizer's best 100M setting with a WSD schedule (decay over the last 20%) | 2 |
 | `e5_ladder_200m.sh <adamw lr> <wd> <muon lr> <wd>` | E5: both optimizers at 200M, 2B tokens, 0.5x / 1x / 2x a centre learning rate each; chains of 1-day jobs | 6 |
 | `e8_ladder_350m.sh <adamw lr> <wd> <muon lr> <wd>` | E8: one run each at 350M, 3.5B tokens, at the learning rate predicted by the 50M-200M trend; chains of 1-day jobs | 2 |
+| `e6_tokens.sh trunks 50m\|100m <adamw lr> <wd> <muon lr> <wd>` | E6: WSD run to 30 tokens/parameter per optimizer, keeping the checkpoints where 10 and 20 tokens/parameter cool down | 2 |
+| `e6_tokens.sh branches 50m\|100m <adamw lr> <wd> <muon lr> <wd>` | E6: cooldown branches at 10 and 20 tokens/parameter from those checkpoints (`branch.py`); after the trunk passes 20 | 4 |
 
 Order: `e0_pilot.sh` (all four stages) → `estimate_cost.py` → E1 stage1 → stage2 → seeds → E1b sweep → E1b wsd → E5 → E8.
+E6 needs only E1/E1b: trunks, then branches.
 
 Conventions used by every run:
 
@@ -53,3 +56,11 @@ Results: `gw1b python team3/analysis/scale_report.py $GW1B_SCRATCH/teams/team3/r
 (finished or still training) and writes tables and plots: each optimizer's best setting per size with its seed
 spread, the share of AdamW's tokens Muon needs to reach AdamW's final loss, and the trend of that share with model
 size. `--prefix team3-e1-` restricts it to one experiment. Live curves: `gw1b tensorboard $GW1B_SCRATCH/teams/team3/runs`.
+
+Branches (`branch.py`): a branch copies one checkpoint of a longer run into a new run directory, with the longer
+run's metrics up to that step, and `gw1b train` finishes it from there. The tool refuses unless the branch would
+have trained exactly like the trunk up to that step (same model, data, batch, optimizer and the same learning rate
+at every step), so a branch equals a standalone run of its length (`tests/test_team3_branch.py` checks this).
+The trunk must keep every checkpoint (`run.ckpt_keep_every=1`): the tool checks the settings stored in
+each one up to the branch point. Start a branch on the same number and type of GPUs as its trunk. Its `summary.json` GPU-hours include the trunk's
+hours up to the branch point; the extra cost of a branch is only its own cooldown.
