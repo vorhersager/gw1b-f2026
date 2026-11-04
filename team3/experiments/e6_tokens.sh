@@ -35,33 +35,57 @@ trunk() {  # trunk <optimizer> <lr> <wd>
     --set run.ckpt_every=$((K / 2)) --set run.ckpt_keep_every=1
 }
 
-check_branches() {  # before submitting anything: both trunks have the 20 tokens/parameter checkpoint, no branch exists
-  local opt lr wd out
+prepared() {  # prepared <out> <trunk name> <step>: made by branch.py from this trunk and step, not submitted yet
+  local d="$RUNS/$1"
+  [[ -f "$d/branch.json" && ! -e "$d/.submitted" && "$(ls "$d/checkpoints" 2>/dev/null)" == "$3" ]] &&
+    grep -q "\"trunk\": \".*/$2\"" "$d/branch.json" && grep -q "\"step\": $3," "$d/branch.json"
+}
+
+check_branches() {  # before preparing anything: both trunks have the 20 tokens/parameter checkpoint, and each
+  local opt lr wd i out trunk  # branch folder is either missing or prepared by an earlier attempt that stopped
   for args in "adamw $1 $2" "muon $3 $4"; do
     read -r opt lr wd <<< "$args"
-    [[ -d "$RUNS/$(name "$opt" "$lr" "$wd" "${TOKS[2]}")/checkpoints/$((2 * K))" ]] || {
-      echo "$(name "$opt" "$lr" "$wd" "${TOKS[2]}") has no checkpoint at step $((2 * K)) yet; wait for it" >&2; exit 1; }
+    trunk="$(name "$opt" "$lr" "$wd" "${TOKS[2]}")"
+    [[ -d "$RUNS/$trunk/checkpoints/$((2 * K))" ]] || {
+      echo "$trunk has no checkpoint at step $((2 * K)) yet; wait for it" >&2; exit 1; }
     for i in 0 1; do
       out="$(name "$opt" "$lr" "$wd" "${TOKS[$i]}")"
-      [[ ! -e "$RUNS/$out" ]] || { echo "$RUNS/$out already exists; nothing submitted" >&2; exit 1; }
+      [[ ! -e "$RUNS/$out" ]] || prepared "$out" "$trunk" $((K * (i + 1))) || {
+        echo "$RUNS/$out already exists and was submitted or started; nothing submitted" >&2; exit 1; }
     done
   done
 }
 
-branches() {  # branches <optimizer> <lr> <wd>
-  local trunk_dir="$RUNS/$(name "$1" "$2" "$3" "${TOKS[2]}")" i out
-  for i in 0 1; do
-    out="$(name "$1" "$2" "$3" "${TOKS[$i]}")"
-    local prep=(gw1b python team3/experiments/branch.py "$trunk_dir" --step $((K * (i + 1))) --tokens "${NTOK[$i]}" --name "$out")
-    if [[ $SUBMIT -eq 1 ]]; then echo "+ ${prep[*]}"; "${prep[@]}"; else echo "${prep[*]}"; fi
+BRANCHES=()   # "<optimizer> <lr> <wd> <i>" for each branch, AdamW first
+for i in 0 1; do BRANCHES+=("adamw $3 $4 $i"); done
+for i in 0 1; do BRANCHES+=("muon $5 $6 $i"); done
+
+branches() {  # prepare all four branches with branch.py, then submit them, so a failed preparation submits nothing
+  local opt lr wd i out trunk
+  for b in "${BRANCHES[@]}"; do
+    read -r opt lr wd i <<< "$b"
+    out="$(name "$opt" "$lr" "$wd" "${TOKS[$i]}")" trunk="$(name "$opt" "$lr" "$wd" "${TOKS[2]}")"
+    local prep=(gw1b python team3/experiments/branch.py "$RUNS/$trunk" --step $((K * (i + 1))) --tokens "${NTOK[$i]}" --name "$out")
+    if [[ $SUBMIT -eq 0 ]]; then echo "${prep[*]}"
+    elif prepared "$out" "$trunk" $((K * (i + 1))); then echo "+ $out: prepared by an earlier attempt, reusing it"
+    else
+      echo "+ ${prep[*]}"
+      "${prep[@]}" || { echo "preparing $out failed; nothing submitted. Fix it and run this again: branches" \
+        "prepared so far are reused" >&2; exit 1; }
+    fi
+  done
+  for b in "${BRANCHES[@]}"; do
+    read -r opt lr wd i <<< "$b"
+    out="$(name "$opt" "$lr" "$wd" "${TOKS[$i]}")"
     emit $COMMON --time $BRANCH_TIME --name gw1b-e6-branch --config "$RUNS/$out/config.yaml"
+    [[ $SUBMIT -eq 0 ]] || touch "$RUNS/$out/.submitted"   # a rerun must not queue it twice
   done
 }
 
 case "$STAGE" in
   trunks)   trunk adamw "$3" "$4";    trunk muon "$5" "$6" ;;
   branches) [[ $SUBMIT -eq 0 ]] || check_branches "$3" "$4" "$5" "$6"
-            branches adamw "$3" "$4"; branches muon "$5" "$6" ;;
+            branches ;;
   *) echo "usage: $0 trunks|branches 50m|100m <adamw_lr> <adamw_wd> <muon_lr> <muon_wd> [--submit]" >&2; exit 2 ;;
 esac
 finish

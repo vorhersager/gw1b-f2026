@@ -111,3 +111,44 @@ def test_branch_equals_a_standalone_run(tmp_path):
     out = subprocess.run(tool[:3] + ["--name", "changed-branch", "--set", "run.total_steps=20", "--step", "16"],
                          env=env, cwd=ROOT, capture_output=True, text=True)
     assert out.returncode != 0 and "checkpoint 16: optim.lr" in out.stderr and not (runs / "changed-branch").exists()
+
+
+FAKE_GW1B = """#!/usr/bin/env bash
+# Stands in for gw1b: `python .../branch.py <trunk> --step S --tokens N --name OUT` makes the folder branch.py would
+# (or fails for the name in $FAIL_NAME); `train ...` is only logged.
+if [[ "$1" == train ]]; then echo "$*" >> "$TRAIN_LOG"; exit 0; fi
+trunk="$3" step="$5" out="$GW1B_SCRATCH/teams/team3/runs/$9"
+[[ "$9" != "$FAIL_NAME" ]] || { echo "fake branch.py: refused" >&2; exit 1; }
+mkdir -p "$out/checkpoints/$step"
+printf '{\\n  "trunk": "%s",\\n  "step": %s,\\n  "total_steps": 0\\n}\\n' "$trunk" "$step" > "$out/branch.json"
+"""
+
+
+def test_e6_branches_submit_nothing_until_all_four_are_prepared(tmp_path):
+    bin_dir, runs = tmp_path / "bin", tmp_path / "scratch" / "teams" / "team3" / "runs"
+    bin_dir.mkdir()
+    (bin_dir / "gw1b").write_text(FAKE_GW1B)
+    (bin_dir / "gw1b").chmod(0o755)
+    name = "team3-e6-50m-{}-lr4.8e-3-wd{}-tok{}-s0"
+    for opt, wd in (("adamw", "0.1"), ("muon", "0.3")):
+        (runs / name.format(opt, wd, "1.5B") / "checkpoints" / "3052").mkdir(parents=True)
+    log = tmp_path / "train.log"
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", GW1B_SCRATCH=str(tmp_path / "scratch"),
+               TRAIN_LOG=str(log), FAIL_NAME=name.format("muon", "0.3", "1B"))
+    cmd = ["bash", "team3/experiments/e6_tokens.sh", "branches", "50m", "4.8e-3", "0.1", "4.8e-3", "0.3", "--submit"]
+    submitted = lambda: log.read_text().count("train") if log.exists() else 0  # noqa: E731
+
+    out = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
+    assert out.returncode != 0 and "nothing submitted" in out.stderr
+    assert submitted() == 0                                     # the last preparation failed: no job queued
+    assert sorted(p.name for p in runs.iterdir()) == sorted(
+        [name.format("adamw", "0.1", t) for t in ("0.5B", "1B", "1.5B")] + [name.format("muon", "0.3", t)
+                                                                           for t in ("0.5B", "1.5B")])
+
+    env["FAIL_NAME"] = ""                                       # fixed: the rerun reuses the three prepared ones
+    out = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.count("reusing it") == 3 and submitted() == 4
+
+    out = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
+    assert out.returncode != 0 and "was submitted or started" in out.stderr and submitted() == 4
