@@ -46,8 +46,8 @@ this arithmetic; its table is in [CLUSTER_FACTS.md](CLUSTER_FACTS.md).
 How to read the table:
 
 * **V100** is the oldest and the most numerous (~120 GPUs). It is fine for notebooks and for the 50M–100M
-  proxy models, but it has no bf16 tensor cores: training runs in `float32` there (`model.dtype: auto`
-  picks it), which is roughly eight times slower per GPU than bf16 on an A100. It also only supports CUDA 12, which
+  proxy models, but it has no bf16 tensor cores: train in `float32` there (`--set model.dtype=float32`),
+  which is roughly eight times slower per GPU than bf16 on an A100. It also only supports CUDA 12, which
   is why the whole class uses the CUDA 12 build of JAX.
 * **A100** is the workhorse: bf16, 80 GB, flash attention. There are only 16 on the whole campus and they
   run around the clock. The eight on a node are NVLinked in pairs (0–3, 1–2, 4–7, 5–6); the rest of the
