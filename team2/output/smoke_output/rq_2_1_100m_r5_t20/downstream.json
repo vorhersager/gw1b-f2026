@@ -1,0 +1,26 @@
+{
+  "run": "rq_2_1_100m_r5_t20",
+  "batch_size": 16,
+  "limit": 50,
+  "n_examples": {
+    "hellaswag": 50,
+    "arc_easy": 50,
+    "piqa": 50
+  },
+  "scores": {
+    "hellaswag": {
+      "acc": 0.36,
+      "acc_norm": 0.42
+    },
+    "arc_easy": {
+      "acc": 0.42,
+      "acc_norm": 0.42
+    },
+    "piqa": {
+      "acc": 0.62,
+      "acc_norm": 0.62
+    }
+  },
+  "device_kind": "NVIDIA A100 80GB PCIe",
+  "step": 7629
+}
