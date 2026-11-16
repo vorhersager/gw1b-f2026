@@ -1,0 +1,12 @@
+run,size,finished,loss_available,downstream_available,latency_files
+rq_2_1_100m_r1_t20,100M,True,True,True,2
+rq_2_1_100m_r1_t60,100M,True,True,True,2
+rq_2_1_100m_r2_t20,100M,True,True,True,2
+rq_2_1_100m_r2_t60,100M,True,True,True,2
+rq_2_1_100m_r3_t20,100M,True,True,True,2
+rq_2_1_100m_r3_t60,100M,True,True,True,2
+rq_2_1_100m_r4_t20,100M,True,True,True,2
+rq_2_1_100m_r4_t60,100M,True,True,True,2
+rq_2_1_100m_r5_t20,100M,True,True,True,2
+rq_2_1_100m_r5_t60,100M,True,True,True,2
+team2-rq2.1-350m-dmodel_1280-nlayers_18-t20-lr_4.8e-3,350M,True,False,False,0
