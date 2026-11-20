@@ -1,0 +1,7 @@
+run,n_params,tokens,val_loss,summary_path
+team2-rq2.2-100m-t10,100092672,999817216,3.0343124866485596,/scratch/gw1b-class/teams/team2/runs/team2-rq2.2-100m-t10/summary.json
+team2-rq2.2-100m-t20,100092672,1999896576,2.9322588443756104,/scratch/gw1b-class/teams/team2/runs/team2-rq2.2-100m-t20/summary.json
+team2-rq2.2-100m-t30,100092672,2999975936,2.882845640182495,/scratch/gw1b-class/teams/team2/runs/team2-rq2.2-100m-t30/summary.json
+team2-rq2.2-50m-t10,50213376,499908608,3.277724027633667,/scratch/gw1b-class/teams/team2/runs/team2-rq2.2-50m-t10/summary.json
+team2-rq2.2-50m-t20,50213376,999817216,3.151757001876831,/scratch/gw1b-class/teams/team2/runs/team2-rq2.2-50m-t20/summary.json
+team2-rq2.2-50m-t30,50213376,1499987968,3.094282865524292,/scratch/gw1b-class/teams/team2/runs/team2-rq2.2-50m-t30/summary.json
